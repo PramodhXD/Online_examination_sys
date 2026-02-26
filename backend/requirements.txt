@@ -1,0 +1,38 @@
+# FastAPI & Server
+fastapi
+uvicorn[standard]
+
+# Database (PostgreSQL)
+sqlalchemy
+psycopg2-binary
+asyncpg
+alembic
+
+# Authentication & Security
+python-jose
+passlib[bcrypt]
+bcrypt==4.0.1
+python-multipart
+email-validator
+
+# Face Recognition & CV (will be used later)
+opencv-python
+deepface
+tf-keras
+numpy
+scipy
+Pillow
+
+# Utilities
+python-dotenv
+requests
+
+# Certificate & QR Code
+qrcode
+reportlab
+
+# Logging
+loguru
+
+# Testing
+pytest

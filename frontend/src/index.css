@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 transition-colors duration-300;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(59 130 246);
+    outline-offset: 2px;
+  }
+
+  html.dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+
+  /* Global dark overrides for existing light utility usage across pages */
+  html.dark .bg-white {
+    background-color: rgb(15 23 42) !important;
+  }
+
+  html.dark .bg-gray-50,
+  html.dark .bg-gray-100,
+  html.dark .bg-slate-50,
+  html.dark .bg-slate-100 {
+    background-color: rgb(2 6 23) !important;
+  }
+
+  html.dark .text-slate-900,
+  html.dark .text-gray-900,
+  html.dark .text-gray-800 {
+    color: rgb(241 245 249) !important;
+  }
+
+  html.dark .text-slate-700,
+  html.dark .text-slate-600,
+  html.dark .text-gray-700,
+  html.dark .text-gray-600,
+  html.dark .text-gray-500 {
+    color: rgb(148 163 184) !important;
+  }
+
+  html.dark .border-gray-100,
+  html.dark .border-gray-200,
+  html.dark .border-slate-100,
+  html.dark .border-slate-200 {
+    border-color: rgb(51 65 85) !important;
+  }
+}
