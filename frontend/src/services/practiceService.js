@@ -1,58 +1,59 @@
 import api from "./api";
 
-const practiceService = {
+const PRACTICE_BASE = "/practice";
 
-  // =====================================================
-  // ✅ Get all practice categories
-  // =====================================================
+const practiceService = {
   getCategories: async () => {
-    const response = await api.get("/practice/categories");
+    const response = await api.get(`${PRACTICE_BASE}/categories`);
     return response.data;
   },
 
-
-  // =====================================================
-  // ✅ Start Practice Attempt (JWT based)
-  // =====================================================
   startPractice: async (categoryId) => {
-    const response = await api.post("/practice/start", null, {
+    const response = await api.post(`${PRACTICE_BASE}/start`, null, {
       params: { category_id: categoryId }
     });
 
-    return response.data;  // { attempt_id: number }
-  },
-
-
-  // =====================================================
-  // ✅ Get random questions by category
-  // =====================================================
-  getQuestionsByCategory: async (categoryId, limit = 5) => {
-    const response = await api.get(
-      `/practice/${categoryId}?limit=${limit}`
-    );
     return response.data;
   },
 
+  getQuestionsByCategory: async (categoryId, limit = 5, attemptId = null) => {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (attemptId !== null && attemptId !== undefined) {
+      params.set("attempt_id", String(attemptId));
+    }
 
-  // =====================================================
-  // ✅ Submit practice answers (WITH attempt_id)
-  // =====================================================
-  submitPractice: async (attemptId, questions, selectedAnswers) => {
+    const response = await api.get(`${PRACTICE_BASE}/${categoryId}?${params.toString()}`);
+    return response.data;
+  },
 
+  getAttemptReview: async (attemptId) => {
+    const response = await api.get(`${PRACTICE_BASE}/attempts/${attemptId}/review`);
+    return response.data;
+  },
+
+  submitPractice: async (
+    attemptId,
+    questions,
+    selectedAnswers,
+    questionTimes = [],
+    submitReason = "manual"
+  ) => {
     const formattedAnswers = questions.map((question, index) => ({
       question_id: question.id,
-      selected_option: selectedAnswers[index]
+      selected_option: Number.isInteger(selectedAnswers[index]) ? selectedAnswers[index] : 0
     }));
 
     const payload = {
-      attempt_id: attemptId,   // ✅ REQUIRED NOW
-      answers: formattedAnswers
+      attempt_id: attemptId,
+      answers: formattedAnswers,
+      question_times: questions.map((_, index) => Math.max(0, Number(questionTimes[index]) || 0)),
+      submit_reason: submitReason
     };
 
-    const response = await api.post("/practice/submit", payload);
+    const response = await api.post(`${PRACTICE_BASE}/submit`, payload);
     return response.data;
   }
-
 };
 
 export default practiceService;

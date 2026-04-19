@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { verifyMonitor } from "../services/authService";
+import assessmentService from "../services/assessmentService";
 import { ExamContext } from "./exam-context";
 import {
   drawVideoFrameCover,
+  MONITOR_FRAME_HEIGHT,
+  MONITOR_FRAME_WIDTH,
   USER_FACING_CAMERA_CONSTRAINTS,
 } from "../utils/camera";
 
@@ -21,6 +24,14 @@ function getMonitoringEmail() {
   }
 }
 
+function isProgrammingExamRoute(pathname) {
+  return /^\/programming-exam\/[^/]+\/start$/.test(pathname || "");
+}
+
+function isAssessmentExamRoute(pathname) {
+  return pathname === "/assessment/start";
+}
+
 export default function ExamProvider({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -29,12 +40,52 @@ export default function ExamProvider({ children }) {
   const [warningMessage, setWarningMessage] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(true);
   const [examTerminated, setExamTerminated] = useState(false);
+  const [liveAlerts, setLiveAlerts] = useState([]);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [cameraError, setCameraError] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
+  const [monitorVerified, setMonitorVerified] = useState(false);
 
   const MAX_WARNINGS = 3;
 
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
-  const stopMonitoring = () => {
+  const monitoringPathRef = useRef("");
+  const monitoringSessionRef = useRef(null);
+  const shouldMonitor =
+    !examTerminated &&
+    (
+      (isAssessmentExamRoute(location.pathname) && sessionStorage.getItem("faceVerified") === "true")
+      || isProgrammingExamRoute(location.pathname)
+    );
+
+  const addAlert = useCallback((message, level = "warning") => {
+    setLiveAlerts((prev) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        message,
+        level,
+        timestamp: Date.now(),
+      },
+      ...prev,
+    ].slice(0, 6));
+  }, []);
+
+  const reportProctorEvent = useCallback(async (eventType, message) => {
+    const session = monitoringSessionRef.current;
+    if (!session?.attemptId || session.type !== "assessment") return;
+
+    try {
+      await assessmentService.reportProctoringEvent(session.attemptId, {
+        event_type: eventType,
+        message,
+      });
+    } catch {
+      void 0;
+    }
+  }, []);
+
+  const stopMonitoring = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -43,11 +94,16 @@ export default function ExamProvider({ children }) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
-  };
+    setCameraStream(null);
+    setCameraReady(false);
+    setMonitorVerified(false);
+  }, []);
 
   /* ================= WARNING HANDLER ================= */
-  const handleWarning = (reason) => {
+  const handleWarning = useCallback((reason, eventType = "monitor_warning") => {
     setWarningMessage(reason);
+    addAlert(reason, "warning");
+    void reportProctorEvent(eventType, reason);
 
     setWarnings((prev) => {
       const newCount = prev + 1;
@@ -60,17 +116,11 @@ export default function ExamProvider({ children }) {
     setTimeout(() => {
       setWarningMessage("");
     }, 2000);
-  };
+  }, [MAX_WARNINGS, addAlert, reportProctorEvent]);
 
   /* ================= FULLSCREEN + TAB MONITOR ================= */
   useEffect(() => {
-    const isAssessmentRoute = location.pathname === "/assessment/start";
-    const isAssessmentStarted =
-      sessionStorage.getItem("faceVerified") === "true";
-    const shouldEnforceFullscreen =
-      isAssessmentRoute && isAssessmentStarted && !examTerminated;
-
-    if (!shouldEnforceFullscreen) {
+    if (!shouldMonitor) {
       setIsFullscreen(true);
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => { void 0; });
@@ -91,14 +141,14 @@ export default function ExamProvider({ children }) {
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        handleWarning("Tab switching detected");
+        handleWarning("Tab switching detected", "tab_switch");
       }
     };
 
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
         setIsFullscreen(false);
-        handleWarning("Exited fullscreen mode");
+        handleWarning("Exited fullscreen mode", "fullscreen_exit");
       } else {
         setIsFullscreen(true);
       }
@@ -111,14 +161,19 @@ export default function ExamProvider({ children }) {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [examTerminated, location.pathname]);
+  }, [handleWarning, shouldMonitor]);
 
   /* ================= CONTINUOUS FACE MONITORING ================= */
   useEffect(() => {
-    const isAssessmentStarted =
-      sessionStorage.getItem("faceVerified") === "true";
-    const isAssessmentRoute = location.pathname === "/assessment/start";
-    if (examTerminated || !isAssessmentStarted || !isAssessmentRoute) return;
+    if (!shouldMonitor) return;
+
+    if (monitoringPathRef.current !== location.pathname) {
+      setWarnings(0);
+      setWarningMessage("");
+      setLiveAlerts([]);
+      setCameraError("");
+      monitoringPathRef.current = location.pathname;
+    }
 
     let mismatchCount = 0;
     let noFaceSince = null;
@@ -132,6 +187,10 @@ export default function ExamProvider({ children }) {
         });
 
         streamRef.current = stream;
+        setCameraStream(stream);
+        setCameraReady(true);
+        setCameraError("");
+        addAlert("Proctoring camera connected", "info");
 
         const video = document.createElement("video");
         video.srcObject = stream;
@@ -142,6 +201,11 @@ export default function ExamProvider({ children }) {
         const email = getMonitoringEmail();
 
         if (!email) {
+          setCameraError("Unable to identify the logged-in student for face monitoring.");
+          stream.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+          setCameraStream(null);
+          setCameraReady(false);
           return;
         }
 
@@ -150,13 +214,16 @@ export default function ExamProvider({ children }) {
           if (!video.videoWidth || !video.videoHeight) return;
           isVerifying = true;
 
-          const drawn = drawVideoFrameCover(video, canvas);
+          const drawn = drawVideoFrameCover(video, canvas, {
+            width: MONITOR_FRAME_WIDTH,
+            height: MONITOR_FRAME_HEIGHT,
+          });
           if (!drawn) {
             isVerifying = false;
             return;
           }
 
-          const imageData = canvas.toDataURL("image/jpeg", 0.8);
+          const imageData = canvas.toDataURL("image/jpeg", 0.6);
 
           try {
             const data = await verifyMonitor({
@@ -168,19 +235,21 @@ export default function ExamProvider({ children }) {
             if (data.error === "multiple_faces") {
               noFaceSince = null;
               noFaceWarningSent = false;
-              handleWarning("Multiple faces detected");
+              setMonitorVerified(false);
+              handleWarning("Multiple faces detected", "multiple_faces");
               return;
             }
 
             /* ===== NO FACE DETECTED ===== */
             if (data.error === "face_not_detected") {
+              setMonitorVerified(false);
               if (!noFaceSince) {
                 noFaceSince = Date.now();
               }
 
               const noFaceDurationMs = Date.now() - noFaceSince;
               if (noFaceDurationMs >= 5000 && !noFaceWarningSent) {
-                handleWarning("No face detected for more than 5 seconds");
+                handleWarning("No face detected for more than 5 seconds", "no_face_detected");
                 noFaceWarningSent = true;
               }
               return;
@@ -188,13 +257,14 @@ export default function ExamProvider({ children }) {
 
             noFaceSince = null;
             noFaceWarningSent = false;
+            setMonitorVerified(Boolean(data.verified));
 
             /* ===== FACE MISMATCH ===== */
             if (!data.verified && data.similarity < 0.60) {
               mismatchCount++;
 
               if (mismatchCount >= 2) {
-                handleWarning("Face mismatch detected");
+                handleWarning("Face mismatch detected", "face_mismatch");
                 mismatchCount = 0;
               }
             } else {
@@ -208,7 +278,10 @@ export default function ExamProvider({ children }) {
         }, 1000); // every 1 second
 
       } catch {
-        handleWarning("Camera access denied");
+        setCameraError("Camera access denied");
+        setCameraReady(false);
+        setMonitorVerified(false);
+        handleWarning("Camera access denied", "camera_access_denied");
       }
     };
 
@@ -217,18 +290,32 @@ export default function ExamProvider({ children }) {
     return () => {
       stopMonitoring();
     };
-  }, [examTerminated, location.pathname]);
+  }, [addAlert, handleWarning, location.pathname, shouldMonitor, stopMonitoring]);
+
+  useEffect(() => {
+    if (!isProgrammingExamRoute(location.pathname) && !isAssessmentExamRoute(location.pathname)) {
+      setWarnings(0);
+      setWarningMessage("");
+      setLiveAlerts([]);
+      setExamTerminated(false);
+      setCameraError("");
+      monitoringPathRef.current = "";
+      monitoringSessionRef.current = null;
+      stopMonitoring();
+    }
+  }, [location.pathname, stopMonitoring]);
 
   /* ================= FINISH EXAM ================= */
-  const finishExam = () => {
+  const finishExam = useCallback(() => {
     stopMonitoring();
+    monitoringSessionRef.current = null;
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => { void 0; });
     }
 
     sessionStorage.removeItem("faceVerified");
     navigate("/dashboard", { replace: true });
-  };
+  }, [navigate, stopMonitoring]);
 
   return (
     <ExamContext.Provider
@@ -238,6 +325,17 @@ export default function ExamProvider({ children }) {
         isFullscreen,
         MAX_WARNINGS,
         examTerminated,
+        liveAlerts,
+        cameraStream,
+        cameraError,
+        cameraReady,
+        monitorVerified,
+        registerMonitoringSession: (session) => {
+          monitoringSessionRef.current = session;
+        },
+        clearMonitoringSession: () => {
+          monitoringSessionRef.current = null;
+        },
         stopMonitoring,
         finishExam,
       }}

@@ -13,6 +13,13 @@ const certificateService = {
     );
     return response.data;
   },
+
+  verifyCertificate: async (token) => {
+    const response = await api.get(
+      `/assessments/certificates/verify/${encodeURIComponent(token)}`
+    );
+    return response.data;
+  },
 };
 
 export default certificateService;

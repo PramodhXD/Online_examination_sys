@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.utils.jwt import get_current_user
 from app.models.assessment import AssessmentAttempt, AssessmentCategory
 from app.models.practice import PracticeAttempt, PracticeCategory
+from app.models.programming_exam import ProgrammingAttempt, ProgrammingExam
 from app.models.user import User
 from app.schemas.dashboard import (
     LeaderboardEntry,
@@ -30,10 +31,15 @@ router = APIRouter(
 )
 
 ASSESSMENT_FINAL_STATUSES = ["COMPLETED", "VIOLATION_SUBMITTED"]
+PRACTICE_FINAL_STATUSES = ["COMPLETED"]
 
 
 def _is_assessment_final(status: str | None) -> bool:
     return (status or "").upper() in ASSESSMENT_FINAL_STATUSES
+
+
+def _is_practice_final(status: str | None) -> bool:
+    return (status or "").upper() in PRACTICE_FINAL_STATUSES
 
 
 async def _build_leaderboard_rows(db: AsyncSession, scope: str):
@@ -288,6 +294,25 @@ async def get_student_dashboard(
             SkillProficiency(skill_name=name, score=round(float(score or 0), 2))
         )
 
+    programming_avg = await db.scalar(
+        select(
+            func.avg(
+                (ProgrammingAttempt.score * 100.0) / func.nullif(ProgrammingAttempt.total, 0)
+            )
+        )
+        .where(
+            ProgrammingAttempt.user_id == user_id,
+            func.upper(ProgrammingAttempt.status) == "COMPLETED",
+            ProgrammingAttempt.total.isnot(None),
+            ProgrammingAttempt.total > 0,
+        )
+    )
+
+    if programming_avg is not None:
+        skill_proficiency.append(
+            SkillProficiency(skill_name="Programming", score=round(float(programming_avg), 2))
+        )
+
     skill_proficiency.sort(key=lambda x: x.score, reverse=True)
 
     # ================= STUDENT RANK =================
@@ -430,6 +455,7 @@ async def get_performance_history(
     for attempt, category in assess_query.all():
         history.append({
             "id": attempt.id,
+            "category_id": attempt.category_id,
             "exam_name": category.title,
             "type": "Assessment",
             "date": attempt.completed_at or attempt.started_at,
@@ -452,13 +478,40 @@ async def get_performance_history(
     for attempt, category in practice_query.all():
         history.append({
             "id": attempt.id,
+            "category_id": attempt.category_id,
             "exam_name": category.name,
             "type": "Practice",
             "date": attempt.completed_at or attempt.started_at,
             "score": float(attempt.accuracy or 0)
-                     if _is_assessment_final(attempt.status)
+                     if _is_practice_final(attempt.status)
                      else None,
             "status": attempt.status.upper()
+        })
+
+    # ================= PROGRAMMING EXAM HISTORY =================
+    programming_query = await db.execute(
+        select(ProgrammingAttempt, ProgrammingExam)
+        .join(ProgrammingExam, ProgrammingExam.id == ProgrammingAttempt.exam_id)
+        .where(
+            ProgrammingAttempt.user_id == user_id
+        )
+        .order_by(desc(ProgrammingAttempt.started_at))
+    )
+
+    for attempt, exam in programming_query.all():
+        total = float(attempt.total or 0)
+        score = float(attempt.score or 0)
+        percentage = (score / total * 100.0) if total > 0 else 0.0
+        is_final = (attempt.status or "").upper() in {"COMPLETED", "VIOLATION_SUBMITTED"}
+
+        history.append({
+            "id": attempt.id,
+            "category_id": attempt.exam_id,
+            "exam_name": exam.title,
+            "type": "Programming",
+            "date": attempt.completed_at or attempt.started_at,
+            "score": percentage if is_final else None,
+            "status": (attempt.status or "").upper() or "IN_PROGRESS"
         })
 
     # ================= SORT COMBINED =================

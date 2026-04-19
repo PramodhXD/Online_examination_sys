@@ -37,3 +37,21 @@ export const changePassword = async (data) => {
   const response = await api.post("/users/change-password", data);
   return response.data;
 };
+
+/**
+ * Submit support ticket
+ * POST /users/support-tickets
+ */
+export const submitSupportTicket = async (data) => {
+  const response = await api.post("/users/support-tickets", data);
+  return response.data;
+};
+
+/**
+ * Get my support tickets
+ * GET /users/support-tickets
+ */
+export const getMyTickets = async () => {
+  const response = await api.get("/users/support-tickets");
+  return response.data;
+};

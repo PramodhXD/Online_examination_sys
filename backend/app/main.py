@@ -1,15 +1,16 @@
-import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from app.core.config import CORS_ORIGINS, RUN_STARTUP_DB_TASKS
-from app.db.startup_tasks import run_startup_db_tasks
-from app.models import admin as admin_models  # noqa: F401
-from app.models.exam_assignment import ExamAssignment  # noqa: F401
-from app.routers import admin, assessment, auth, dashboard, face, practice, users
+from app.core.config import CORS_ORIGINS
+import app.models  # noqa: F401
+from app.routers import admin, assessment, auth, code, dashboard, face, notifications, practice, users
+from app.routers import programming_exam
 
-logger = logging.getLogger(__name__)
+API_PREFIX = "/api"
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 app = FastAPI(
     title="Online Examination System",
@@ -25,24 +26,20 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    if not RUN_STARTUP_DB_TASKS:
-        return
+app.include_router(auth.router, prefix=API_PREFIX)
+app.include_router(face.router, prefix=API_PREFIX)
+app.include_router(users.router, prefix=API_PREFIX)
+app.include_router(practice.router, prefix=API_PREFIX)
+app.include_router(assessment.router, prefix=API_PREFIX)
+app.include_router(dashboard.router, prefix=API_PREFIX)
+app.include_router(admin.router, prefix=API_PREFIX)
+app.include_router(notifications.router, prefix=API_PREFIX)
+app.include_router(code.router, prefix=API_PREFIX)
+app.include_router(code.result_router, prefix=API_PREFIX)
+app.include_router(programming_exam.router, prefix=API_PREFIX)
 
-    logger.warning(
-        "RUN_STARTUP_DB_TASKS is enabled. Schema/data bootstrapping will run at app startup."
-    )
-    await run_startup_db_tasks()
-
-
-app.include_router(auth.router)
-app.include_router(face.router)
-app.include_router(users.router)
-app.include_router(practice.router)
-app.include_router(assessment.router)
-app.include_router(dashboard.router)
-app.include_router(admin.router)
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
 
 
 @app.get("/")

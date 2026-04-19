@@ -1,10 +1,14 @@
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from fastapi import HTTPException
 
+from app.models.admin import AdminStudentMeta
 from app.models.user import User
-from app.utils.security import verify_password
 from app.utils.jwt import create_access_token
+from app.utils.security import verify_password
+
+
+BLOCKED_ACCOUNT_MESSAGE = "Account is blocked by admin"
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str):
@@ -13,30 +17,36 @@ async def authenticate_user(db: AsyncSession, email: str, password: str):
     )
     user = result.scalar_one_or_none()
 
-    # ❌ User not found
     if not user:
         return None
 
-    # 🚫 Block deleted users
     if user.is_deleted:
         raise HTTPException(
             status_code=403,
-            detail="Account has been deleted"
+            detail="Account has been deleted",
         )
 
-    # ❌ Invalid password
+    student_meta = (
+        await db.execute(
+            select(AdminStudentMeta).where(AdminStudentMeta.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if student_meta and bool(student_meta.blocked):
+        raise HTTPException(
+            status_code=403,
+            detail=BLOCKED_ACCOUNT_MESSAGE,
+        )
+
     if not verify_password(password, user.hashed_password):
         return None
 
-    # ✅ Create JWT token
     token = create_access_token(
         {
             "sub": str(user.id),
-            "role": user.role
+            "role": user.role,
         }
     )
 
-    # ✅ Return structured response
     return {
         "access_token": token,
         "role": user.role,

@@ -7,6 +7,7 @@ import {
   MonitorPlay,
   BarChart3,
   History,
+  LifeBuoy,
   Settings,
   Award,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const menuItems = [
   { id: "live", icon: MonitorPlay, label: "Live Monitoring", path: "/admin/live" },
   { id: "analytics", icon: BarChart3, label: "Results & Analytics", path: "/admin/analytics" },
   { id: "reports", icon: History, label: "Reports & Logs", path: "/admin/reports" },
+  { id: "support", icon: LifeBuoy, label: "Support Tickets", path: "/admin/tickets" },
   { id: "certificates", icon: Award, label: "Certificate Issuance", path: "/admin/certificates" },
   { id: "settings", icon: Settings, label: "Settings", path: "/admin/settings" },
 ];

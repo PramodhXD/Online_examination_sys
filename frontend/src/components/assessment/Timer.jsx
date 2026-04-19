@@ -1,26 +1,38 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Clock3 } from "lucide-react";
 
-export default function Timer() {
-  const [seconds, setSeconds] = useState(60 * 60); // 60 minutes
+export default function Timer({
+  totalSeconds = 0,
+  remainingSeconds = 0,
+  title = "Aptitude Assessment",
+  onTimeout,
+}) {
+  const timeoutTriggeredRef = useRef(false);
+  const seconds = Math.max(0, Math.floor(Number(remainingSeconds) || 0));
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setSeconds((prev) => Math.max(prev - 1, 0));
-    }, 1000);
+    if (seconds <= 0) {
+      if (!timeoutTriggeredRef.current) {
+        timeoutTriggeredRef.current = true;
+        onTimeout?.();
+      }
+      return undefined;
+    }
 
-    return () => clearInterval(interval);
-  }, []);
+    timeoutTriggeredRef.current = false;
+    return undefined;
+  }, [onTimeout, seconds]);
 
   const minutes = String(Math.floor(seconds / 60)).padStart(2, "0");
   const secs = String(seconds % 60).padStart(2, "0");
-  const percent = (seconds / (60 * 60)) * 100;
+  const safeTotalSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const percent = safeTotalSeconds > 0 ? (seconds / safeTotalSeconds) * 100 : 0;
 
   return (
     <div className="sticky top-0 z-20 border-b border-slate-800/60 bg-slate-950 text-white px-4 sm:px-6 lg:px-8 py-4 shadow">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-lg font-semibold tracking-wide">
-          Aptitude Assessment
+          {title}
         </h1>
 
         <div className="flex items-center gap-3">

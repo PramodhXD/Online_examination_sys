@@ -6,6 +6,8 @@ class UserCreate(BaseModel):
     name: str
     email: EmailStr
     roll_number: str
+    course: str
+    batch: str
     password: str
 
 class UserResponse(BaseModel):
@@ -20,8 +22,27 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class UserProfileResponse(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+    face_verified: bool = False
+    face_verification_date: Optional[datetime] = None
+    roll_number: str
+    course: str
+    batch: str
+    role: Optional[str] = None
+    subscription_plan: str = "FREE"
+
+    class Config:
+        from_attributes = True
+
+
 class UpdateProfileSchema(BaseModel):
     name: str
+    roll_number: str
+    course: str
+    batch: str
 
 
 class ChangePasswordSchema(BaseModel):
@@ -77,3 +98,37 @@ class RazorpayVerifyRequest(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
     razorpay_signature: str
+
+
+class SupportTicketCreate(BaseModel):
+    subject: str = Field(..., min_length=5, max_length=120)
+    category: str = Field(default="general", max_length=50)
+    priority: str = Field(default="medium", max_length=20)
+    message: str = Field(..., min_length=10, max_length=2000)
+
+
+class SupportTicketResponse(BaseModel):
+    ticket_id: str
+    message: str
+    submitted_at: datetime
+
+
+class SupportTicketReplyItem(BaseModel):
+    id: int
+    author_role: str
+    author_name: str
+    message: str
+    created_at: datetime
+
+
+class SupportTicketItem(BaseModel):
+    id: int
+    ticket_id: str
+    subject: str
+    category: str
+    priority: str
+    message: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    replies: list[SupportTicketReplyItem] = []

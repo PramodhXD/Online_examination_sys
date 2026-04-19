@@ -111,7 +111,7 @@ export default function LoginForm() {
           </button>
         </div>
 
-        <div className="text-right">
+        <div className="text-left">
           <button
             type="button"
             onClick={() => navigate("/forgot-password")}

@@ -4,6 +4,7 @@ import {
   Hash,
   Mail,
   Lock,
+  Layers3,
   Eye,
   EyeOff,
   CheckCircle,
@@ -12,6 +13,10 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { loginUser, registerUser } from "../../services/authService";
+import {
+  CUSTOM_COURSE_VALUE,
+} from "../../constants/courseOptions";
+import CoursePicker from "../common/CoursePicker";
 import PasswordStrength from "./PasswordStrength";
 import TermsCheckbox from "./TermsCheckbox";
 
@@ -28,6 +33,9 @@ function RegisterForm() {
   const [formData, setFormData] = useState({
     name: "",
     rollNumber: "",
+    course: "",
+    customCourse: "",
+    batch: "",
     email: "",
     password: "",
     confirmPassword: "",
@@ -51,10 +59,18 @@ function RegisterForm() {
   const canSubmit =
     Boolean(formData.name.trim()) &&
     Boolean(formData.rollNumber.trim()) &&
+    Boolean(getNormalizedCourse().trim()) &&
+    Boolean(formData.batch.trim()) &&
     Boolean(formData.email.trim()) &&
     isPasswordValid &&
     isConfirmPasswordValid &&
     formData.agree;
+
+  function getNormalizedCourse() {
+    return formData.course === CUSTOM_COURSE_VALUE
+      ? formData.customCourse
+      : formData.course;
+  }
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -77,6 +93,8 @@ function RegisterForm() {
         name: formData.name.trim(),
         email: formData.email.trim(),
         roll_number: formData.rollNumber.trim(),
+        course: getNormalizedCourse().trim(),
+        batch: formData.batch.trim(),
         password: formData.password,
       };
 
@@ -98,6 +116,9 @@ function RegisterForm() {
       setFormData({
         name: "",
         rollNumber: "",
+        course: "",
+        customCourse: "",
+        batch: "",
         email: "",
         password: "",
         confirmPassword: "",
@@ -146,6 +167,36 @@ function RegisterForm() {
           value={formData.rollNumber}
           onChange={handleChange}
           placeholder="CS2025A102"
+          autoComplete="off"
+          required
+        />
+
+        <CoursePicker
+          id="register-course"
+          label="Course"
+          value={formData.course}
+          customValue={formData.customCourse}
+          onSelect={(nextValue) => {
+            setFormData((prev) => ({
+              ...prev,
+              course: nextValue,
+              customCourse:
+                nextValue === CUSTOM_COURSE_VALUE ? prev.customCourse : "",
+            }));
+          }}
+          onCustomChange={(nextValue) =>
+            setFormData((prev) => ({ ...prev, customCourse: nextValue }))
+          }
+        />
+
+        <InputField
+          id="register-batch"
+          label="Batch"
+          icon={Layers3}
+          name="batch"
+          value={formData.batch}
+          onChange={handleChange}
+          placeholder="2024-28"
           autoComplete="off"
           required
         />

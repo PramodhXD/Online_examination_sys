@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { KeyRound, ShieldCheck } from "lucide-react";
 import { verifyOtp } from "../../services/authService";
 import { useLocation, useNavigate } from "react-router-dom";
+import PolicyLinks from "../../components/common/PolicyLinks";
 
 export default function VerifyOtp() {
   const [otp, setOtp] = useState("");
@@ -47,7 +48,7 @@ export default function VerifyOtp() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-white to-indigo-100 px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-sky-50 via-white to-indigo-100 px-4 py-8">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl relative">
         <div className="absolute -top-10 left-1/2 -translate-x-1/2">
           <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-tr from-sky-600 to-indigo-600 shadow-lg">
@@ -111,6 +112,7 @@ export default function VerifyOtp() {
           </button>
         </div>
       </div>
+      <PolicyLinks className="mt-6" />
     </div>
   );
 }

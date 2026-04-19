@@ -57,7 +57,7 @@ export default function AssessmentsTable({ assessments = [] }) {
               <tr
                 key={index}
                 onClick={() => navigate("/performance")}
-                className="border-b dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700 cursor-pointer transition"
+                className="cursor-pointer border-b transition-colors hover:bg-gray-50 dark:border-slate-700 dark:hover:bg-slate-700"
               >
                 <td className="py-3 font-medium text-gray-800 dark:text-white">
                   {exam.exam_name}

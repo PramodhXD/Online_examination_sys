@@ -1,14 +1,14 @@
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
 from app.core.subscription import get_plan_config
-from app.models.admin import AdminLog, AdminSetting, AdminStudentMeta
+from app.models.admin import AdminLog, AdminSetting, AdminStudentMeta, SupportTicket, SupportTicketReply
 from app.models.assessment import (
     AssessmentAnswer,
     AssessmentAttempt,
@@ -16,11 +16,22 @@ from app.models.assessment import (
     AssessmentQuestion,
 )
 from app.models.exam_assignment import ExamAssignment
-from app.models.practice import PracticeAnswer, PracticeAttempt, PracticeCategory
+from app.models.practice import PracticeAnswer, PracticeAttempt, PracticeCategory, PracticeQuestion
+from app.models.programming_exam import (
+    ProgrammingExam,
+    ProgrammingExamAssignment,
+    ProgrammingProblem,
+    ProgrammingTestCase,
+)
 from app.models.user import User
 from app.schemas.admin import (
     AdminCertificateEligibleItem,
     AdminDashboardStats,
+    AdminSupportTicketItem,
+    AdminSupportTicketReplyCreate,
+    AdminSupportTicketReplyUpdate,
+    AdminSupportTicketReplyItem,
+    AdminSupportTicketStatusUpdate,
     AnalyticsItem,
     ExamCreate,
     ExamAssignmentResponse,
@@ -37,7 +48,13 @@ from app.schemas.admin import (
     StudentListItem,
     StudentResultsResponse,
     TimeCheckResponse,
+    ProgrammingExamAdminResponse,
+    ProgrammingExamCreate,
+    ProgrammingExamUpdate,
+    ProgrammingProblemAdmin,
+    ProgrammingTestCaseAdmin,
 )
+from app.services.notification_service import create_notification
 from app.utils.face_storage import delete_user_face_data
 from app.utils.exam_assignment import (
     ALL_SCOPE,
@@ -45,6 +62,13 @@ from app.utils.exam_assignment import (
     assignment_count_for_category,
     assignment_mode_from_rows,
     get_assignment_rows,
+)
+from app.utils.programming_exam_assignment import (
+    ALL_SCOPE as PROGRAMMING_ALL_SCOPE,
+    STUDENT_SCOPE as PROGRAMMING_STUDENT_SCOPE,
+    get_programming_assignment_rows,
+    programming_assignment_count,
+    programming_assignment_mode_from_rows,
 )
 from app.utils.attempt_limits import (
     UNLIMITED_ATTEMPT_LIMIT,
@@ -56,6 +80,49 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 ASSESSMENT_FINAL_STATUSES = ["COMPLETED", "VIOLATION_SUBMITTED"]
 PASS_PERCENTAGE = 50.0
+
+
+def _normalize_ticket_status(status: str | None) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"open", "in_progress", "resolved", "closed"}:
+        return normalized
+    raise HTTPException(status_code=400, detail="Invalid ticket status")
+
+
+def _build_support_ticket_item(ticket: SupportTicket, student: User) -> AdminSupportTicketItem:
+    latest_admin_reply = next(
+        (
+            reply.message
+            for reply in reversed(ticket.replies)
+            if str(reply.author_role or "").lower() == "admin"
+        ),
+        ticket.admin_reply,
+    )
+    return AdminSupportTicketItem(
+        id=ticket.id,
+        ticket_id=ticket.ticket_id,
+        student_id=student.id,
+        student_name=student.name,
+        student_email=student.email,
+        subject=ticket.subject,
+        category=ticket.category,
+        priority=ticket.priority,
+        message=ticket.message,
+        status=str(ticket.status or "open").lower(),
+        admin_reply=latest_admin_reply,
+        created_at=ticket.created_at,
+        updated_at=ticket.updated_at,
+        replies=[
+            AdminSupportTicketReplyItem(
+                id=reply.id,
+                author_role=reply.author_role,
+                author_name=reply.author_name,
+                message=reply.message,
+                created_at=reply.created_at,
+            )
+            for reply in ticket.replies
+        ],
+    )
 
 
 async def _require_admin(
@@ -71,24 +138,6 @@ async def _require_admin(
     return user
 
 
-def _faces_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "faces"
-
-
-def _face_key_from_roll(roll_number: str | None) -> str:
-    value = str(roll_number or "").strip()
-    if (
-        not value
-        or "/" in value
-        or "\\" in value
-        or value in {".", ".."}
-        or ".." in value
-        or ":" in value
-    ):
-        return ""
-    return value
-
-
 def _is_completed(status: str | None) -> bool:
     return (status or "").upper() in ASSESSMENT_FINAL_STATUSES
 
@@ -99,6 +148,7 @@ def _is_in_progress(status: str | None) -> bool:
 
 _VALID_EXAM_TYPES = {"ASSESSMENT", "PRACTICE"}
 _VALID_EXAM_LIFECYCLE_STATUSES = {"DRAFT", "PUBLISHED"}
+_VALID_PROGRAMMING_STATUSES = {"DRAFT", "PUBLISHED"}
 
 
 def _coerce_exam_type(value: str | None) -> str:
@@ -139,11 +189,127 @@ def _validate_attempt_limit(value: int | None) -> int:
     return limit
 
 
+def _validate_programming_status(value: str | None) -> str:
+    normalized = (value or "draft").strip().upper()
+    if normalized not in _VALID_PROGRAMMING_STATUSES:
+        raise HTTPException(status_code=400, detail="status must be draft or published")
+    return normalized.lower()
+
+
+def _normalize_programming_test_cases(
+    test_cases: list[ProgrammingTestCaseAdmin] | list[dict],
+) -> list[dict]:
+    normalized: list[dict] = []
+    for raw in test_cases:
+        data = raw if isinstance(raw, dict) else raw.dict()  # type: ignore[assignment]
+        input_data = str(data.get("input_data") or "")
+        expected_output = str(data.get("expected_output") or "")
+        is_sample = bool(data.get("is_sample"))
+        try:
+            marks = int(data.get("marks") or 1)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Test case marks must be a number")
+        if marks <= 0:
+            raise HTTPException(status_code=400, detail="Test case marks must be at least 1")
+        normalized.append(
+            {
+                "input_data": input_data,
+                "expected_output": expected_output,
+                "is_sample": is_sample,
+                "marks": marks,
+            }
+        )
+    return normalized
+
+
+def _total_marks_from_tests(test_cases: list[dict]) -> int:
+    if not test_cases:
+        return 0
+    hidden_marks = sum(int(tc.get("marks") or 1) for tc in test_cases if not tc.get("is_sample"))
+    if hidden_marks > 0:
+        return hidden_marks
+    return sum(int(tc.get("marks") or 1) for tc in test_cases)
+
+
+def _build_programming_exam_response(
+    exam: ProgrammingExam,
+    problem: ProgrammingProblem | None = None,
+    test_cases: list[ProgrammingTestCase] | None = None,
+    assigned_students: int = 0,
+) -> ProgrammingExamAdminResponse:
+    problem_payload = None
+    if problem:
+        cases = test_cases or []
+        problem_payload = ProgrammingProblemAdmin(
+            id=problem.id,
+            title=problem.title,
+            difficulty=problem.difficulty,
+            statement=problem.statement,
+            input_format=problem.input_format,
+            output_format=problem.output_format,
+            constraints=problem.constraints,
+            sample_input=problem.sample_input,
+            sample_output=problem.sample_output,
+            starter_code=problem.starter_code,
+            test_cases=[
+                ProgrammingTestCaseAdmin(
+                    id=case.id,
+                    input_data=case.input_data,
+                    expected_output=case.expected_output,
+                    is_sample=bool(case.is_sample),
+                    marks=case.marks,
+                )
+                for case in cases
+            ],
+        )
+
+    return ProgrammingExamAdminResponse(
+        id=exam.id,
+        title=exam.title,
+        description=exam.description or "",
+        duration_minutes=exam.duration_minutes,
+        total_marks=exam.total_marks,
+        assigned_students=assigned_students,
+        status=exam.status,
+        created_at=exam.created_at,
+        problem=problem_payload,
+    )
+
+
 def _live_cutoff_for_duration(duration_minutes: int | None) -> datetime:
     duration = int(duration_minutes or 0)
     # Treat only recent in-progress attempts as truly live.
     window_minutes = max(15, duration + 15)
     return datetime.utcnow() - timedelta(minutes=window_minutes)
+
+
+def _attempt_face_status(*, face_verified: bool, webcam_alerts: int, total_alerts: int) -> str:
+    if int(webcam_alerts or 0) > 0:
+        return "alert"
+    if not face_verified:
+        return "warning"
+    if int(total_alerts or 0) > 0:
+        return "warning"
+    return "ok"
+
+
+async def _get_or_create_student_meta(db: AsyncSession, user_id: int) -> AdminStudentMeta:
+    meta = (
+        await db.execute(select(AdminStudentMeta).where(AdminStudentMeta.user_id == user_id))
+    ).scalar_one_or_none()
+    if meta is not None:
+        return meta
+
+    meta = AdminStudentMeta(
+        user_id=user_id,
+        department="General",
+        batch="2024-28",
+        blocked=False,
+        face_status="not_registered",
+    )
+    db.add(meta)
+    await db.flush()
+    return meta
 
 
 def _code_prefix(exam_type: str) -> str:
@@ -165,6 +331,18 @@ async def _search_students_for_assignment(
         )
     query = query.order_by(User.name.asc()).limit(limit)
     return (await db.execute(query)).scalars().all()
+
+
+def _student_items(students: list[User]) -> list[dict]:
+    return [
+        {
+            "id": student.id,
+            "name": student.name,
+            "email": student.email,
+            "roll_number": student.roll_number,
+        }
+        for student in students
+    ]
 
 
 async def _student_activity_logs(db: AsyncSession) -> list[LogResponse]:
@@ -446,27 +624,11 @@ async def list_students(
         )
 
     users = (await db.execute(query.offset((page - 1) * page_size).limit(page_size))).scalars().all()
-    faces_dir = _faces_root()
     out: List[StudentListItem] = []
 
     for u in users:
         plan = (u.subscription_plan or "FREE").strip().upper()
-        meta = (
-            await db.execute(select(AdminStudentMeta).where(AdminStudentMeta.user_id == u.id))
-        ).scalar_one_or_none()
-
-        if not meta:
-            face_key = _face_key_from_roll(u.roll_number)
-            detected_face = "verified" if (face_key and (faces_dir / face_key / "template.json").exists()) else "not_registered"
-            meta = AdminStudentMeta(
-                user_id=u.id,
-                department="General",
-                batch="2024-28",
-                blocked=False,
-                face_status=detected_face,
-            )
-            db.add(meta)
-            await db.flush()
+        meta = await _get_or_create_student_meta(db, u.id)
 
         if department != "all" and meta.department != department:
             continue
@@ -545,6 +707,16 @@ async def issue_student_certificates(
     if issued > 0:
         db.add(AdminLog(event_type="Admin", message=f"Issued {issued} certificate(s) for {user.email}"))
     await db.commit()
+    if issued > 0:
+        await create_notification(
+            db,
+            user_id=user.id,
+            title="Certificate generated",
+            message=f"{issued} new certificate(s) are now available in your account.",
+            notification_type="success",
+            link="/certificates",
+        )
+        await db.commit()
     return {"student_id": student_id, "issued": issued}
 
 
@@ -641,6 +813,15 @@ async def issue_single_certificate(
             event_type="Admin",
             message=f"Certificate issued for {user.email} in '{category.title}' (attempt {attempt.id})",
         )
+    )
+    await db.commit()
+    await create_notification(
+        db,
+        user_id=user.id,
+        title="Certificate generated",
+        message=f"Your certificate for '{category.title}' is now available.",
+        notification_type="success",
+        link="/certificates",
     )
     await db.commit()
     return {"attempt_id": attempt.id, "issued": True, "message": "Certificate issued"}
@@ -948,6 +1129,387 @@ async def update_exam(
         assigned_students=assigned,
         status=status,
     )
+
+
+@router.get("/programming-exams", response_model=List[ProgrammingExamAdminResponse])
+async def list_programming_exams_admin(
+    search: str = "",
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(ProgrammingExam)
+    if search:
+        like = f"%{search.lower()}%"
+        query = query.where(
+            func.lower(ProgrammingExam.title).like(like)
+            | func.lower(ProgrammingExam.description).like(like)
+        )
+    rows = (await db.execute(query.order_by(ProgrammingExam.created_at.desc()))).scalars().all()
+    out: list[ProgrammingExamAdminResponse] = []
+    for exam in rows:
+        assignment_rows = await get_programming_assignment_rows(db, exam.id)
+        assigned = await programming_assignment_count(db, exam.id, assignment_rows)
+        out.append(_build_programming_exam_response(exam, assigned_students=assigned))
+    return out
+
+
+@router.get("/programming-exams/{exam_id}", response_model=ProgrammingExamAdminResponse)
+async def get_programming_exam_admin(
+    exam_id: int,
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    exam = (await db.execute(select(ProgrammingExam).where(ProgrammingExam.id == exam_id))).scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Programming exam not found")
+
+    problem = (
+        await db.execute(
+            select(ProgrammingProblem)
+            .where(ProgrammingProblem.exam_id == exam_id)
+            .order_by(ProgrammingProblem.id.asc())
+        )
+    ).scalars().first()
+    if not problem:
+        assignment_rows = await get_programming_assignment_rows(db, exam.id)
+        assigned = await programming_assignment_count(db, exam.id, assignment_rows)
+        return _build_programming_exam_response(exam, None, [], assigned_students=assigned)
+
+    test_cases = (
+        await db.execute(
+            select(ProgrammingTestCase)
+            .where(ProgrammingTestCase.problem_id == problem.id)
+            .order_by(ProgrammingTestCase.id.asc())
+        )
+    ).scalars().all()
+    assignment_rows = await get_programming_assignment_rows(db, exam.id)
+    assigned = await programming_assignment_count(db, exam.id, assignment_rows)
+    return _build_programming_exam_response(exam, problem, test_cases, assigned_students=assigned)
+
+
+@router.post("/programming-exams", response_model=ProgrammingExamAdminResponse)
+async def create_programming_exam(
+    payload: ProgrammingExamCreate,
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    exists = await db.scalar(
+        select(func.count()).select_from(ProgrammingExam).where(
+            func.lower(ProgrammingExam.title) == title.lower()
+        )
+    ) or 0
+    if exists:
+        raise HTTPException(status_code=400, detail="Programming exam title already exists")
+
+    test_cases_raw = payload.problem.test_cases or []
+    if not test_cases_raw:
+        raise HTTPException(status_code=400, detail="Provide at least one test case")
+
+    test_cases = _normalize_programming_test_cases(
+        [tc.dict() for tc in test_cases_raw]
+    )
+    total_marks = (
+        int(payload.total_marks)
+        if payload.total_marks is not None
+        else _total_marks_from_tests(test_cases)
+    )
+
+    exam = ProgrammingExam(
+        title=title,
+        description=(payload.description or "").strip(),
+        status=_validate_programming_status(payload.status),
+        duration_minutes=int(payload.duration_minutes),
+        total_marks=total_marks,
+    )
+    db.add(exam)
+    await db.flush()
+
+    problem_payload = payload.problem
+    problem = ProgrammingProblem(
+        exam_id=exam.id,
+        title=problem_payload.title.strip() or "Programming Problem",
+        difficulty=problem_payload.difficulty or "Easy",
+        statement=problem_payload.statement.strip(),
+        input_format=problem_payload.input_format or "",
+        output_format=problem_payload.output_format or "",
+        constraints=problem_payload.constraints or "",
+        sample_input=problem_payload.sample_input or "",
+        sample_output=problem_payload.sample_output or "",
+        starter_code=problem_payload.starter_code or "",
+    )
+    db.add(problem)
+    await db.flush()
+
+    for tc in test_cases:
+        db.add(
+            ProgrammingTestCase(
+                problem_id=problem.id,
+                input_data=tc["input_data"],
+                expected_output=tc["expected_output"],
+                is_sample=tc["is_sample"],
+                marks=tc["marks"],
+            )
+        )
+
+    db.add(AdminLog(event_type="Admin", message=f"Programming exam created: {exam.title}"))
+    await db.commit()
+
+    test_case_rows = (
+        await db.execute(
+            select(ProgrammingTestCase)
+            .where(ProgrammingTestCase.problem_id == problem.id)
+            .order_by(ProgrammingTestCase.id.asc())
+        )
+    ).scalars().all()
+    return _build_programming_exam_response(exam, problem, test_case_rows, assigned_students=0)
+
+
+@router.put("/programming-exams/{exam_id}", response_model=ProgrammingExamAdminResponse)
+async def update_programming_exam(
+    exam_id: int,
+    payload: ProgrammingExamUpdate,
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    exam = (await db.execute(select(ProgrammingExam).where(ProgrammingExam.id == exam_id))).scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Programming exam not found")
+
+    if payload.title is not None:
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="Title is required")
+        duplicate = await db.scalar(
+            select(func.count()).select_from(ProgrammingExam).where(
+                ProgrammingExam.id != exam_id,
+                func.lower(ProgrammingExam.title) == title.lower(),
+            )
+        ) or 0
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Programming exam title already exists")
+        exam.title = title
+
+    if payload.description is not None:
+        exam.description = payload.description.strip()
+    if payload.duration_minutes is not None:
+        exam.duration_minutes = int(payload.duration_minutes)
+    if payload.status is not None:
+        exam.status = _validate_programming_status(payload.status)
+
+    problem = (
+        await db.execute(
+            select(ProgrammingProblem)
+            .where(ProgrammingProblem.exam_id == exam_id)
+            .order_by(ProgrammingProblem.id.asc())
+        )
+    ).scalars().first()
+
+    if payload.problem is not None:
+        problem_payload = payload.problem
+        if problem is None:
+            problem = ProgrammingProblem(
+                exam_id=exam.id,
+                title=problem_payload.title.strip() or "Programming Problem",
+                difficulty=problem_payload.difficulty or "Easy",
+                statement=problem_payload.statement.strip(),
+                input_format=problem_payload.input_format or "",
+                output_format=problem_payload.output_format or "",
+                constraints=problem_payload.constraints or "",
+                sample_input=problem_payload.sample_input or "",
+                sample_output=problem_payload.sample_output or "",
+                starter_code=problem_payload.starter_code or "",
+            )
+            db.add(problem)
+            await db.flush()
+        else:
+            problem.title = problem_payload.title.strip() or problem.title
+            problem.difficulty = problem_payload.difficulty or problem.difficulty
+            problem.statement = problem_payload.statement.strip()
+            problem.input_format = problem_payload.input_format or ""
+            problem.output_format = problem_payload.output_format or ""
+            problem.constraints = problem_payload.constraints or ""
+            problem.sample_input = problem_payload.sample_input or ""
+            problem.sample_output = problem_payload.sample_output or ""
+            problem.starter_code = problem_payload.starter_code or ""
+
+        if problem_payload.test_cases is not None:
+            test_cases_raw = problem_payload.test_cases or []
+            if not test_cases_raw:
+                raise HTTPException(status_code=400, detail="Provide at least one test case")
+            test_cases = _normalize_programming_test_cases(
+                [tc.dict() for tc in test_cases_raw]
+            )
+            await db.execute(
+                delete(ProgrammingTestCase).where(ProgrammingTestCase.problem_id == problem.id)
+            )
+            for tc in test_cases:
+                db.add(
+                    ProgrammingTestCase(
+                        problem_id=problem.id,
+                        input_data=tc["input_data"],
+                        expected_output=tc["expected_output"],
+                        is_sample=tc["is_sample"],
+                        marks=tc["marks"],
+                    )
+                )
+            exam.total_marks = (
+                int(payload.total_marks)
+                if payload.total_marks is not None
+                else _total_marks_from_tests(test_cases)
+            )
+    elif payload.total_marks is not None:
+        exam.total_marks = int(payload.total_marks)
+
+    db.add(AdminLog(event_type="Admin", message=f"Programming exam updated: {exam.title}"))
+    await db.commit()
+
+    if problem:
+        test_case_rows = (
+            await db.execute(
+                select(ProgrammingTestCase)
+                .where(ProgrammingTestCase.problem_id == problem.id)
+                .order_by(ProgrammingTestCase.id.asc())
+            )
+        ).scalars().all()
+        assignment_rows = await get_programming_assignment_rows(db, exam.id)
+        assigned = await programming_assignment_count(db, exam.id, assignment_rows)
+        return _build_programming_exam_response(exam, problem, test_case_rows, assigned_students=assigned)
+    assignment_rows = await get_programming_assignment_rows(db, exam.id)
+    assigned = await programming_assignment_count(db, exam.id, assignment_rows)
+    return _build_programming_exam_response(exam, None, [], assigned_students=assigned)
+
+
+@router.get("/programming-exams/{exam_id}/assignments", response_model=ExamAssignmentResponse)
+async def get_programming_exam_assignments(
+    exam_id: int,
+    search: str = "",
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    exam = (await db.execute(select(ProgrammingExam).where(ProgrammingExam.id == exam_id))).scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Programming exam not found")
+
+    rows = await get_programming_assignment_rows(db, exam_id)
+    assignment_mode = programming_assignment_mode_from_rows(rows)
+    assigned_students = await programming_assignment_count(db, exam_id, rows)
+    selected_ids = sorted({row.user_id for row in rows if row.user_id is not None})
+
+    selected_students: list[User] = []
+    if selected_ids:
+        selected_students = (
+            await db.execute(
+                select(User)
+                .where(User.id.in_(selected_ids), User.role == "student", User.is_deleted.is_(False))
+                .order_by(User.name.asc())
+            )
+        ).scalars().all()
+
+    candidates = await _search_students_for_assignment(db, search=search, limit=100)
+
+    return ExamAssignmentResponse(
+        exam_id=exam_id,
+        assignment_mode=assignment_mode,
+        assigned_students=assigned_students,
+        selected_students=_student_items(selected_students),
+        candidates=_student_items(candidates),
+    )
+
+
+@router.put("/programming-exams/{exam_id}/assignments", response_model=ExamAssignmentResponse)
+async def update_programming_exam_assignments(
+    exam_id: int,
+    payload: ExamAssignmentUpdate,
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    exam = (await db.execute(select(ProgrammingExam).where(ProgrammingExam.id == exam_id))).scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Programming exam not found")
+
+    mode = (payload.assignment_mode or "").strip().lower()
+    if mode not in {"all", "specific"}:
+        raise HTTPException(status_code=400, detail="assignment_mode must be all or specific")
+
+    await db.execute(delete(ProgrammingExamAssignment).where(ProgrammingExamAssignment.exam_id == exam_id))
+
+    if mode == "all":
+        db.add(
+            ProgrammingExamAssignment(
+                exam_id=exam_id,
+                user_id=None,
+                assignment_scope=PROGRAMMING_ALL_SCOPE,
+            )
+        )
+    else:
+        requested_ids = sorted({int(student_id) for student_id in payload.student_ids if student_id is not None})
+        if not requested_ids:
+            raise HTTPException(status_code=400, detail="Select at least one student for specific assignment")
+
+        valid_students = (
+            await db.execute(
+                select(User.id).where(
+                    User.id.in_(requested_ids),
+                    User.role == "student",
+                    User.is_deleted.is_(False),
+                )
+            )
+        ).scalars().all()
+        valid_ids = sorted({int(student_id) for student_id in valid_students})
+        if not valid_ids:
+            raise HTTPException(status_code=400, detail="No valid students found for assignment")
+
+        for student_id in valid_ids:
+            db.add(
+                ProgrammingExamAssignment(
+                    exam_id=exam_id,
+                    user_id=student_id,
+                    assignment_scope=PROGRAMMING_STUDENT_SCOPE,
+                )
+            )
+
+    db.add(AdminLog(event_type="Admin", message=f"Programming exam assignment updated: {exam.title} ({mode})"))
+    await db.commit()
+
+    rows = await get_programming_assignment_rows(db, exam_id)
+    assigned_students = await programming_assignment_count(db, exam_id, rows)
+    selected_ids = sorted({row.user_id for row in rows if row.user_id is not None})
+    selected_students: list[User] = []
+    if selected_ids:
+        selected_students = (
+            await db.execute(
+                select(User)
+                .where(User.id.in_(selected_ids), User.role == "student", User.is_deleted.is_(False))
+                .order_by(User.name.asc())
+            )
+        ).scalars().all()
+
+    return ExamAssignmentResponse(
+        exam_id=exam_id,
+        assignment_mode=programming_assignment_mode_from_rows(rows),
+        assigned_students=assigned_students,
+        selected_students=_student_items(selected_students),
+        candidates=[],
+    )
+
+
+@router.delete("/programming-exams/{exam_id}")
+async def delete_programming_exam(
+    exam_id: int,
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    exam = (await db.execute(select(ProgrammingExam).where(ProgrammingExam.id == exam_id))).scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Programming exam not found")
+    await db.delete(exam)
+    db.add(AdminLog(event_type="Admin", message=f"Programming exam deleted: {exam.title}"))
+    await db.commit()
+    return {"message": "Programming exam deleted"}
 
 
 @router.get("/exams/{exam_id}/assignments", response_model=ExamAssignmentResponse)
@@ -1385,8 +1947,6 @@ async def list_live_sessions(
         )
     practice_rows = (await db.execute(practice_query)).all()
 
-    faces_dir = _faces_root()
-
     out: List[LiveSessionResponse] = []
     for attempt, user, category in assessment_rows:
         if attempt.started_at and attempt.started_at < _live_cutoff_for_duration(category.duration):
@@ -1403,8 +1963,13 @@ async def list_live_sessions(
         if (attempt.status or "").upper() == "FLAGGED":
             status = "Flagged"
 
-        face_key = _face_key_from_roll(user.roll_number)
-        face_status = "ok" if (face_key and (faces_dir / face_key / "template.json").exists()) else "warning"
+        meta = await _get_or_create_student_meta(db, user.id)
+        total_alerts = int(attempt.proctor_alert_count or 0)
+        face_status = _attempt_face_status(
+            face_verified=str(meta.face_status or "").strip().lower() == "verified",
+            webcam_alerts=int(attempt.webcam_alerts or 0),
+            total_alerts=total_alerts,
+        )
         out.append(
             LiveSessionResponse(
                 id=attempt.id,
@@ -1413,7 +1978,12 @@ async def list_live_sessions(
                 student_name=user.name,
                 exam_title=category.title,
                 face_status=face_status,
-                tab_switches=0,
+                tab_switches=int(attempt.tab_switches or 0),
+                fullscreen_exits=int(attempt.fullscreen_exits or 0),
+                webcam_alerts=int(attempt.webcam_alerts or 0),
+                total_alerts=total_alerts,
+                last_alert_message=attempt.last_proctor_event,
+                last_alert_at=attempt.last_proctor_event_at,
                 progress=progress,
                 status=status,
                 started_at=attempt.started_at or datetime.utcnow(),
@@ -1429,7 +1999,7 @@ async def list_live_sessions(
             continue
 
         total_q = await db.scalar(
-            select(func.count()).select_from(AssessmentQuestion).where(AssessmentQuestion.category_id == category.id)
+            select(func.count()).select_from(PracticeQuestion).where(PracticeQuestion.category_id == category.id)
         ) or 0
         answered_q = await db.scalar(
             select(func.count()).select_from(PracticeAnswer).where(PracticeAnswer.attempt_id == attempt.id)
@@ -1440,8 +2010,13 @@ async def list_live_sessions(
         if (attempt.status or "").upper() == "FLAGGED":
             status = "Flagged"
 
-        face_key = _face_key_from_roll(user.roll_number)
-        face_status = "ok" if (face_key and (faces_dir / face_key / "template.json").exists()) else "warning"
+        meta = await _get_or_create_student_meta(db, user.id)
+        total_alerts = int(attempt.proctor_alert_count or 0)
+        face_status = _attempt_face_status(
+            face_verified=str(meta.face_status or "").strip().lower() == "verified",
+            webcam_alerts=int(attempt.webcam_alerts or 0),
+            total_alerts=total_alerts,
+        )
         out.append(
             LiveSessionResponse(
                 id=-attempt.id,
@@ -1450,7 +2025,12 @@ async def list_live_sessions(
                 student_name=user.name,
                 exam_title=category.name,
                 face_status=face_status,
-                tab_switches=0,
+                tab_switches=int(attempt.tab_switches or 0),
+                fullscreen_exits=int(attempt.fullscreen_exits or 0),
+                webcam_alerts=int(attempt.webcam_alerts or 0),
+                total_alerts=total_alerts,
+                last_alert_message=attempt.last_proctor_event,
+                last_alert_at=attempt.last_proctor_event_at,
                 progress=progress,
                 status=status,
                 started_at=attempt.started_at or datetime.utcnow(),
@@ -1601,6 +2181,8 @@ async def list_logs(
     db: AsyncSession = Depends(get_db),
 ):
     query = select(AdminLog)
+    if event_type == "all":
+        query = query.where(AdminLog.event_type != "Support")
     if event_type not in {"all", "Student"}:
         query = query.where(AdminLog.event_type == event_type)
     if search:
@@ -1630,6 +2212,219 @@ async def list_logs(
 
     combined.sort(key=lambda item: item.created_at, reverse=True)
     return combined
+
+
+@router.get("/support-logs", response_model=List[LogResponse])
+async def list_support_logs(
+    search: str = "",
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(AdminLog).where(AdminLog.event_type == "Support")
+    if search:
+        like = f"%{search.lower()}%"
+        query = query.where(func.lower(AdminLog.message).like(like))
+    rows = (await db.execute(query.order_by(AdminLog.created_at.desc()))).scalars().all()
+    return [
+        LogResponse(id=r.id, event_type=r.event_type, message=r.message, created_at=r.created_at)
+        for r in rows
+    ]
+
+
+@router.get("/tickets", response_model=List[AdminSupportTicketItem])
+async def list_support_tickets(
+    search: str = "",
+    status: str = "all",
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    normalized_status = str(status or "all").strip().lower()
+    if normalized_status not in {"all", "open", "in_progress", "resolved", "closed"}:
+        raise HTTPException(status_code=400, detail="Invalid ticket status filter")
+    query = (
+        select(SupportTicket, User)
+        .join(User, User.id == SupportTicket.user_id)
+        .options(selectinload(SupportTicket.replies))
+        .order_by(SupportTicket.updated_at.desc(), SupportTicket.created_at.desc())
+    )
+    if normalized_status != "all":
+        query = query.where(func.lower(SupportTicket.status) == normalized_status)
+    if search:
+        like = f"%{search.lower()}%"
+        query = query.where(
+            func.lower(SupportTicket.ticket_id).like(like)
+            | func.lower(SupportTicket.subject).like(like)
+            | func.lower(SupportTicket.message).like(like)
+            | func.lower(User.name).like(like)
+            | func.lower(User.email).like(like)
+        )
+
+    rows = (await db.execute(query)).all()
+    return [_build_support_ticket_item(ticket, student) for ticket, student in rows]
+
+
+@router.get("/tickets/{ticket_id}", response_model=AdminSupportTicketItem)
+async def get_support_ticket_detail(
+    ticket_id: int,
+    _: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (
+        await db.execute(
+            select(SupportTicket, User)
+            .join(User, User.id == SupportTicket.user_id)
+            .options(selectinload(SupportTicket.replies))
+            .where(SupportTicket.id == ticket_id)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket, student = row
+    return _build_support_ticket_item(ticket, student)
+
+
+@router.patch("/tickets/{ticket_id}/status")
+async def update_support_ticket_status(
+    ticket_id: int,
+    payload: AdminSupportTicketStatusUpdate,
+    admin_user: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    ticket = (
+        await db.execute(select(SupportTicket).where(SupportTicket.id == ticket_id))
+    ).scalar_one_or_none()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    next_status = _normalize_ticket_status(payload.status)
+    ticket.status = next_status
+    ticket.updated_at = datetime.utcnow()
+    db.add(
+        AdminLog(
+            event_type="Support",
+            message=f"Ticket {ticket.ticket_id} status updated to {next_status} by {admin_user.email}",
+        )
+    )
+    await db.commit()
+    return {"message": "Ticket status updated"}
+
+
+@router.post("/tickets/{ticket_id}/replies")
+async def reply_support_ticket(
+    ticket_id: int,
+    payload: AdminSupportTicketReplyCreate,
+    admin_user: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    ticket = (
+        await db.execute(select(SupportTicket).where(SupportTicket.id == ticket_id))
+    ).scalar_one_or_none()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    message = str(payload.message or "").strip()
+    if len(message) < 2:
+        raise HTTPException(status_code=400, detail="Reply message is required")
+
+    db.add(
+        SupportTicketReply(
+            ticket_id=ticket.id,
+            author_role="admin",
+            author_name=admin_user.name,
+            message=message,
+            created_at=datetime.utcnow(),
+        )
+    )
+    ticket.admin_reply = message
+    ticket.updated_at = datetime.utcnow()
+    if str(ticket.status or "").lower() == "open":
+        ticket.status = "in_progress"
+    db.add(
+        AdminLog(
+            event_type="Support",
+            message=f"Reply added to ticket {ticket.ticket_id} by {admin_user.email}",
+        )
+    )
+    await db.commit()
+    await create_notification(
+        db,
+        user_id=ticket.user_id,
+        title="Support ticket reply",
+        message=f"Your ticket '{ticket.subject}' has a new admin reply.",
+        notification_type="info",
+        link="/my-tickets",
+    )
+    await db.commit()
+    return {"message": "Reply added"}
+
+
+@router.put("/tickets/{ticket_id}/reply", response_model=AdminSupportTicketItem)
+async def reply_and_update_support_ticket(
+    ticket_id: int,
+    payload: AdminSupportTicketReplyUpdate,
+    admin_user: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (
+        await db.execute(
+            select(SupportTicket, User)
+            .join(User, User.id == SupportTicket.user_id)
+            .options(selectinload(SupportTicket.replies))
+            .where(SupportTicket.id == ticket_id)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    ticket, student = row
+    message = str(payload.message or "").strip()
+    if len(message) < 2:
+        raise HTTPException(status_code=400, detail="Reply message is required")
+
+    next_status = _normalize_ticket_status(payload.status)
+    replied_at = datetime.utcnow()
+    db.add(
+        SupportTicketReply(
+            ticket_id=ticket.id,
+            author_role="admin",
+            author_name=admin_user.name,
+            message=message,
+            created_at=replied_at,
+        )
+    )
+    ticket.admin_reply = message
+    ticket.status = next_status
+    ticket.updated_at = replied_at
+    db.add(
+        AdminLog(
+            event_type="Support",
+            message=(
+                f"Reply added to ticket {ticket.ticket_id} by {admin_user.email}; "
+                f"status updated to {next_status}"
+            ),
+        )
+    )
+    await create_notification(
+        db,
+        user_id=ticket.user_id,
+        title="Support ticket updated",
+        message=f"Your ticket '{ticket.subject}' has a new admin reply.",
+        notification_type="info",
+        link="/my-tickets",
+    )
+    await db.commit()
+
+    refreshed = (
+        await db.execute(
+            select(SupportTicket, User)
+            .join(User, User.id == SupportTicket.user_id)
+            .options(selectinload(SupportTicket.replies))
+            .where(SupportTicket.id == ticket_id)
+        )
+    ).first()
+    assert refreshed is not None
+    refreshed_ticket, refreshed_student = refreshed
+    return _build_support_ticket_item(refreshed_ticket, refreshed_student)
 
 
 @router.post("/logs/generate")

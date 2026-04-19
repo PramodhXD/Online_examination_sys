@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import cv2
 import numpy as np
 from deepface import DeepFace
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.admin import AdminStudentMeta
 from app.models.user import User
 from app.utils.jwt import get_current_user
 
@@ -29,6 +31,7 @@ FACE_ROOT.mkdir(parents=True, exist_ok=True)
 VERIFY_THRESHOLD = 0.70
 MONITOR_THRESHOLD = 0.75
 MIN_TEMPLATE_IMAGES = 2
+MONITOR_MAX_DIMENSION = 640
 
 # Security limits.
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -37,6 +40,10 @@ EMBEDDING_MODEL = "Facenet"
 DETECTOR_BACKENDS = ("opencv", "mediapipe")
 MONITOR_FACE_ERRORS = {"multiple_faces", "face_not_detected"}
 SECOND_FACE_AREA_RATIO_THRESHOLD = 0.45
+SECOND_FACE_MIN_IMAGE_AREA_RATIO = 0.06
+FACE_EDGE_MARGIN_RATIO = 0.03
+SAME_FACE_IOU_THRESHOLD = 0.18
+FACE_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 # -----------------------------
@@ -91,6 +98,22 @@ def _detect_image_mime_type(image_bytes: bytes) -> str:
     return "image/jpeg"
 
 
+def _clear_existing_face_files(user_folder: Path) -> None:
+    for existing_file in user_folder.iterdir():
+        if not existing_file.is_file():
+            continue
+
+        file_name = existing_file.name
+        if file_name.startswith("temp_"):
+            continue
+        if file_name == "template.json":
+            existing_file.unlink()
+            continue
+
+        if existing_file.suffix.lower() in FACE_IMAGE_EXTENSIONS:
+            existing_file.unlink()
+
+
 # -----------------------------
 # Authorization
 # -----------------------------
@@ -124,6 +147,27 @@ async def _authorize_and_resolve_face_folder(
     return _user_folder_from_key(roll_key)
 
 
+async def _get_or_create_student_meta(db: AsyncSession, user_id: int) -> AdminStudentMeta:
+    meta = (
+        await db.execute(
+            select(AdminStudentMeta).where(AdminStudentMeta.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if meta is not None:
+        return meta
+
+    meta = AdminStudentMeta(
+        user_id=user_id,
+        department="General",
+        batch="2024-28",
+        blocked=False,
+        face_status="not_registered",
+    )
+    db.add(meta)
+    await db.flush()
+    return meta
+
+
 # -----------------------------
 # Models
 # -----------------------------
@@ -144,6 +188,54 @@ class FaceVerify(BaseModel):
 
 def _compute_embedding(img_path: Path) -> np.ndarray:
     saw_multiple_faces = False
+    image = cv2.imread(str(img_path))
+    image_height, image_width = (image.shape[:2] if image is not None else (0, 0))
+
+    def _face_box(rep: dict) -> tuple[int, int, int, int]:
+        area = rep.get("facial_area") or {}
+        x = int(area.get("x") or 0)
+        y = int(area.get("y") or 0)
+        w = int(area.get("w") or 0)
+        h = int(area.get("h") or 0)
+        return x, y, max(0, w), max(0, h)
+
+    def _face_area(rep: dict) -> int:
+        _, _, w, h = _face_box(rep)
+        return max(0, w * h)
+
+    def _iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
+        ax, ay, aw, ah = box_a
+        bx, by, bw, bh = box_b
+        if aw <= 0 or ah <= 0 or bw <= 0 or bh <= 0:
+            return 0.0
+
+        inter_left = max(ax, bx)
+        inter_top = max(ay, by)
+        inter_right = min(ax + aw, bx + bw)
+        inter_bottom = min(ay + ah, by + bh)
+
+        inter_w = max(0, inter_right - inter_left)
+        inter_h = max(0, inter_bottom - inter_top)
+        intersection = inter_w * inter_h
+        if intersection <= 0:
+            return 0.0
+
+        union = aw * ah + bw * bh - intersection
+        return intersection / union if union > 0 else 0.0
+
+    def _touches_edge(box: tuple[int, int, int, int]) -> bool:
+        if image_width <= 0 or image_height <= 0:
+            return False
+
+        x, y, w, h = box
+        margin_x = image_width * FACE_EDGE_MARGIN_RATIO
+        margin_y = image_height * FACE_EDGE_MARGIN_RATIO
+        return (
+            x <= margin_x
+            or y <= margin_y
+            or (x + w) >= (image_width - margin_x)
+            or (y + h) >= (image_height - margin_y)
+        )
 
     for backend in DETECTOR_BACKENDS:
         try:
@@ -155,23 +247,37 @@ def _compute_embedding(img_path: Path) -> np.ndarray:
             )
 
             if len(reps) > 1:
-                # Some detectors can output tiny false-positive "faces" on edges/background.
-                # If the second face is much smaller than the primary, treat it as noise.
-                def _face_area(rep: dict) -> int:
-                    area = rep.get("facial_area") or {}
-                    w = int(area.get("w") or 0)
-                    h = int(area.get("h") or 0)
-                    return max(0, w * h)
+                sorted_reps = sorted(reps, key=_face_area, reverse=True)
+                primary = sorted_reps[0]
+                primary_area = _face_area(primary)
+                primary_box = _face_box(primary)
+                image_area = image_width * image_height
+                confirmed_second_face = False
 
-                areas = sorted((_face_area(rep) for rep in reps), reverse=True)
-                if len(areas) >= 2 and areas[0] > 0:
-                    ratio = areas[1] / areas[0]
-                    if ratio >= SECOND_FACE_AREA_RATIO_THRESHOLD:
-                        saw_multiple_faces = True
+                for candidate in sorted_reps[1:]:
+                    candidate_area = _face_area(candidate)
+                    candidate_box = _face_box(candidate)
+                    if primary_area <= 0 or candidate_area <= 0:
                         continue
 
-                # Keep only the largest detected face when extras look like noise.
-                reps = [max(reps, key=_face_area)]
+                    area_ratio = candidate_area / primary_area
+                    image_area_ratio = (candidate_area / image_area) if image_area > 0 else 0.0
+                    duplicate_detection = _iou(primary_box, candidate_box) >= SAME_FACE_IOU_THRESHOLD
+                    near_frame_edge = _touches_edge(candidate_box)
+
+                    if duplicate_detection:
+                        continue
+                    if near_frame_edge and image_area_ratio < SECOND_FACE_MIN_IMAGE_AREA_RATIO:
+                        continue
+                    if area_ratio >= SECOND_FACE_AREA_RATIO_THRESHOLD and image_area_ratio >= SECOND_FACE_MIN_IMAGE_AREA_RATIO:
+                        confirmed_second_face = True
+                        break
+
+                if confirmed_second_face:
+                    saw_multiple_faces = True
+                    continue
+
+                reps = [primary]
 
             if len(reps) != 1:
                 continue
@@ -230,6 +336,30 @@ def _decode_base64_image(image: str) -> bytes:
     if len(decoded) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=400, detail="Image too large")
     return decoded
+
+
+def _downscale_image_bytes(image_bytes: bytes, max_dimension: int) -> bytes:
+    if not image_bytes or max_dimension <= 0:
+        return image_bytes
+
+    np_arr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    if image is None:
+        return image_bytes
+
+    height, width = image.shape[:2]
+    longest_side = max(width, height)
+    if longest_side <= max_dimension:
+        return image_bytes
+
+    scale = max_dimension / float(longest_side)
+    new_width = max(1, int(width * scale))
+    new_height = max(1, int(height * scale))
+    resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    success, encoded = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+    if not success:
+        return image_bytes
+    return encoded.tobytes()
 
 
 # -----------------------------
@@ -320,13 +450,8 @@ async def upload_face(
             )
 
         # Replace current training set only after enough valid images pass.
-        for old_file in user_folder.glob("img_*.jpg"):
-            if old_file.is_file():
-                old_file.unlink()
-
+        _clear_existing_face_files(user_folder)
         template_path = user_folder / "template.json"
-        if template_path.exists() and template_path.is_file():
-            template_path.unlink()
 
         for i, temp_path in enumerate(valid_temp_paths):
             final_path = user_folder / f"img_{i}.jpg"
@@ -458,9 +583,27 @@ async def verify_face(
     stored_norm = _safe_l2_normalize(stored_embedding)
     new_norm = _safe_l2_normalize(new_embedding)
     similarity = float(np.dot(stored_norm, new_norm))
+    verified = similarity >= VERIFY_THRESHOLD
+
+    if verified:
+        target_user = (
+            await db.execute(
+                select(User).where(
+                    User.email == _normalize_email(str(data.email)),
+                    User.is_deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        meta = await _get_or_create_student_meta(db, target_user.id)
+        if str(meta.face_status or "").strip().lower() != "verified":
+            meta.face_status = "verified"
+            await db.commit()
 
     return {
-        "verified": similarity >= VERIFY_THRESHOLD,
+        "verified": verified,
         "similarity": similarity,
     }
 
@@ -475,8 +618,23 @@ async def verify_face_monitor(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    user_folder = await _authorize_and_resolve_face_folder(
+        current_user, data.email, db
+    )
+
+    template_path = user_folder / "template.json"
+    if not template_path.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    decoded = _decode_base64_image(data.image)
+    resized_bytes = _downscale_image_bytes(decoded, MONITOR_MAX_DIMENSION)
+
+    temp_path = user_folder / f"temp_{uuid4().hex}.jpg"
+    with open(temp_path, "wb") as f:
+        f.write(resized_bytes)
+
     try:
-        result = await verify_face(data, current_user, db)
+        new_embedding = await run_in_threadpool(_compute_embedding, temp_path)
     except HTTPException as exc:
         detail = str(exc.detail)
         if exc.status_code == 400 and detail in MONITOR_FACE_ERRORS:
@@ -486,9 +644,25 @@ async def verify_face_monitor(
                 "error": detail,
             }
         raise
+    finally:
+        if temp_path.exists():
+            os.remove(temp_path)
+
+    try:
+        with open(template_path, "r") as f:
+            stored_embedding = np.array(json.load(f), dtype=np.float32)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        raise HTTPException(status_code=500, detail="Invalid stored face template")
+
+    if stored_embedding.ndim != 1 or stored_embedding.size == 0:
+        raise HTTPException(status_code=500, detail="Invalid stored face template")
+
+    stored_norm = _safe_l2_normalize(stored_embedding)
+    new_norm = _safe_l2_normalize(new_embedding)
+    similarity = float(np.dot(stored_norm, new_norm))
 
     return {
-        "verified": result["similarity"] >= MONITOR_THRESHOLD,
-        "similarity": result["similarity"],
+        "verified": similarity >= MONITOR_THRESHOLD,
+        "similarity": similarity,
     }
 

@@ -3,6 +3,7 @@ import { CheckCircle, Lock, ShieldCheck, XCircle } from "lucide-react";
 import { resetPassword } from "../../services/authService";
 import { useLocation, useNavigate } from "react-router-dom";
 import PasswordStrength from "../../components/auth/PasswordStrength";
+import PolicyLinks from "../../components/common/PolicyLinks";
 
 export default function ResetPassword() {
   const [password, setPassword] = useState("");
@@ -67,7 +68,7 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-cyan-100 px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-cyan-100 px-4 py-8">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl relative">
         <div className="absolute -top-10 left-1/2 -translate-x-1/2">
           <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-tr from-emerald-600 to-cyan-600 shadow-lg">
@@ -162,6 +163,7 @@ export default function ResetPassword() {
           </button>
         </div>
       </div>
+      <PolicyLinks className="mt-6" />
     </div>
   );
 }

@@ -1,6 +1,8 @@
 export const CAMERA_FRAME_WIDTH = 1280;
 export const CAMERA_FRAME_HEIGHT = 720;
 export const CAMERA_ASPECT_RATIO = CAMERA_FRAME_WIDTH / CAMERA_FRAME_HEIGHT;
+export const MONITOR_FRAME_WIDTH = 640;
+export const MONITOR_FRAME_HEIGHT = 360;
 
 export const USER_FACING_CAMERA_CONSTRAINTS = {
   facingMode: "user",
@@ -9,7 +11,7 @@ export const USER_FACING_CAMERA_CONSTRAINTS = {
   aspectRatio: { ideal: CAMERA_ASPECT_RATIO },
 };
 
-export function drawVideoFrameCover(video, canvas) {
+export function drawVideoFrameCover(video, canvas, options = {}) {
   if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
     return false;
   }
@@ -17,13 +19,16 @@ export function drawVideoFrameCover(video, canvas) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return false;
 
-  canvas.width = CAMERA_FRAME_WIDTH;
-  canvas.height = CAMERA_FRAME_HEIGHT;
+  const targetWidth = Number(options.width) || CAMERA_FRAME_WIDTH;
+  const targetHeight = Number(options.height) || CAMERA_FRAME_HEIGHT;
+  const targetAspect = targetWidth / targetHeight;
+
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
 
   const sourceWidth = video.videoWidth;
   const sourceHeight = video.videoHeight;
   const sourceAspect = sourceWidth / sourceHeight;
-  const targetAspect = CAMERA_ASPECT_RATIO;
 
   let sx = 0;
   let sy = 0;

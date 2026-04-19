@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Crown, Medal, Trophy } from "lucide-react";
+
+import TopThreeCard from "../../components/leaderboard/TopThreeCard";
+import LeaderboardRow from "../../components/leaderboard/LeaderboardRow";
 import DashboardLayout from "../../components/dashboard/layout/DashboardLayout";
 import dashboardService from "../../services/dashboardService";
 import { getErrorMessage } from "../../utils/errorMessage";
@@ -10,11 +12,10 @@ const SCOPE_OPTIONS = [
   { value: "practice", label: "Practice" },
 ];
 
-const PODIUM_STYLES = {
-  1: "border-yellow-200 bg-yellow-50",
-  2: "border-slate-200 bg-slate-50",
-  3: "border-amber-200 bg-amber-50",
-};
+const normalizeEntry = (entry) => ({
+  ...entry,
+  isCurrentUser: Boolean(entry?.isCurrentUser ?? entry?.is_current_user),
+});
 
 export default function Leaderboard() {
   const [scope, setScope] = useState("all");
@@ -31,40 +32,53 @@ export default function Leaderboard() {
         setData(response);
       } catch (err) {
         setData(null);
-        if (err?.response?.status === 403) {
-          setError(getErrorMessage(err, "Upgrade required to access leaderboard."));
-        }
+        const fallback =
+          err?.response?.status === 403
+            ? "Upgrade required to access leaderboard."
+            : "Unable to load leaderboard right now. Please try again.";
+        setError(getErrorMessage(err, fallback));
       } finally {
         setLoading(false);
       }
     };
 
-    loadLeaderboard();
+    void loadLeaderboard();
   }, [scope]);
 
-  const entries = useMemo(() => (Array.isArray(data?.entries) ? data.entries : []), [data]);
+  const entries = useMemo(
+    () => (Array.isArray(data?.entries) ? data.entries.map(normalizeEntry) : []),
+    [data]
+  );
   const podium = entries.slice(0, 3);
 
   return (
     <DashboardLayout title="Leaderboard">
-      <div className="max-w-6xl mx-auto">
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-blue-50 via-white to-emerald-50 p-6 mb-6">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-gradient-to-r from-blue-50 via-white to-emerald-50 p-6 dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-sm font-semibold text-blue-700 tracking-wide uppercase">Student Rankings</p>
-              <h2 className="text-3xl font-bold text-slate-900 mt-1">Leaderboard</h2>
-              <p className="text-slate-600 mt-2">Rankings are based on average score and attempts.</p>
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+                Student Rankings
+              </p>
+              <h2 className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-100">
+                Leaderboard
+              </h2>
+              <p className="mt-2 text-slate-600 dark:text-slate-300">
+                Rankings are based on average score and attempts.
+              </p>
             </div>
+
             <div className="flex flex-wrap gap-2">
               {SCOPE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   type="button"
                   onClick={() => setScope(option.value)}
+                  aria-pressed={scope === option.value}
                   className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                     scope === option.value
-                      ? "bg-slate-900 text-white"
-                      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                      ? "bg-slate-900 text-white dark:bg-blue-600"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   }`}
                 >
                   {option.label}
@@ -72,82 +86,74 @@ export default function Leaderboard() {
               ))}
             </div>
           </div>
-          {!loading && data?.my_rank && (
-            <p className="mt-4 text-sm text-slate-700">
-              Your rank: <span className="font-bold text-slate-900">#{data.my_rank}</span> / {data.total_students}
-            </p>
-          )}
+
+          {!loading && !error ? (
+            <div className="mt-4 flex flex-wrap gap-3 text-sm">
+              <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-slate-700 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200">
+                Total students:{" "}
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {data?.total_students ?? 0}
+                </span>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-slate-700 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200">
+                Your rank:{" "}
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {data?.my_rank != null ? `#${data.my_rank}` : "-"}
+                </span>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {loading ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-8 text-slate-500">Loading leaderboard...</div>
+          <div className="rounded-xl border border-slate-200 bg-white p-8 dark:border-slate-700 dark:bg-slate-900">
+            <div className="animate-pulse space-y-3">
+              <div className="h-4 w-52 rounded bg-slate-200 dark:bg-slate-700" />
+              <div className="h-4 w-full rounded bg-slate-200 dark:bg-slate-700" />
+              <div className="h-4 w-4/5 rounded bg-slate-200 dark:bg-slate-700" />
+            </div>
+          </div>
         ) : error ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-8 text-amber-800">{error}</div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-8 text-amber-800 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+            {error}
+          </div>
         ) : entries.length === 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-8 text-slate-600">No leaderboard data available yet.</div>
+          <div className="rounded-xl border border-slate-200 bg-white p-8 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            No leaderboard data available yet.
+          </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
               {podium.map((entry) => (
-                <div
+                <TopThreeCard
                   key={`podium-${entry.user_id}-${entry.rank}`}
-                  className={`rounded-xl border p-4 ${PODIUM_STYLES[entry.rank] || "border-slate-200 bg-slate-50"}`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="inline-flex items-center gap-1 text-sm font-bold text-slate-800">
-                      {entry.rank === 1 ? <Crown className="w-4 h-4 text-yellow-600" /> : <Medal className="w-4 h-4" />}
-                      #{entry.rank}
-                    </span>
-                    <Trophy className={`w-4 h-4 ${entry.rank === 1 ? "text-yellow-600" : "text-slate-500"}`} />
-                  </div>
-                  <p className="font-semibold text-slate-900">{entry.name}</p>
-                  <p className="text-sm text-slate-600">{entry.roll_number || "-"}</p>
-                  <p className="mt-2 text-lg font-bold text-slate-900">{entry.average_score}%</p>
-                  <p className="text-xs text-slate-500">{entry.attempts} attempts</p>
-                </div>
+                  entry={entry}
+                />
               ))}
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-              <table className="w-full min-w-[760px]">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr className="text-left text-xs uppercase tracking-wide text-slate-600">
-                    <th className="px-5 py-3">Rank</th>
-                    <th className="px-5 py-3">Name</th>
-                    <th className="px-5 py-3">Roll Number</th>
-                    <th className="px-5 py-3">Average Score</th>
-                    <th className="px-5 py-3">Attempts</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((entry) => (
-                    <tr
-                      key={`${entry.user_id}-${entry.rank}`}
-                      className={`border-b border-slate-100 ${
-                        entry.is_current_user ? "bg-blue-50" : "hover:bg-slate-50"
-                      }`}
-                    >
-                      <td className="px-5 py-3 font-semibold text-slate-800">
-                        <span className="inline-flex items-center gap-2">
-                          {entry.rank <= 3 ? (
-                            <Medal className={`w-4 h-4 ${entry.rank === 1 ? "text-yellow-600" : "text-slate-500"}`} />
-                          ) : null}
-                          #{entry.rank}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-slate-900 font-medium">
-                        {entry.name}
-                        {entry.is_current_user ? (
-                          <span className="ml-2 rounded-full bg-blue-600 text-white text-[10px] px-2 py-0.5">You</span>
-                        ) : null}
-                      </td>
-                      <td className="px-5 py-3 text-slate-700">{entry.roll_number || "-"}</td>
-                      <td className="px-5 py-3 text-slate-900">{entry.average_score}%</td>
-                      <td className="px-5 py-3 text-slate-700">{entry.attempts}</td>
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+              <div className="max-h-[560px] overflow-auto">
+                <table className="w-full min-w-[820px]">
+                  <thead className="sticky top-0 z-10 border-b border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <tr className="text-left text-xs uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      <th className="px-5 py-3">Rank</th>
+                      <th className="px-5 py-3">Student</th>
+                      <th className="px-5 py-3">Roll Number</th>
+                      <th className="px-5 py-3">Score</th>
+                      <th className="px-5 py-3">Attempts</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry) => (
+                      <LeaderboardRow
+                        key={`${entry.user_id}-${entry.rank}`}
+                        entry={entry}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </>
         )}

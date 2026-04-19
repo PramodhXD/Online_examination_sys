@@ -18,10 +18,7 @@ export default function ProtectedRoute({ children, allowedRoles = null }) {
     allowedRoles.length > 0 &&
     !allowedRoles.includes(user?.role)
   ) {
-    if (user?.role === "admin") {
-      return <Navigate to="/admin/dashboard" replace />;
-    }
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/access-denied" replace state={{ from: location }} />;
   }
 
   return children;

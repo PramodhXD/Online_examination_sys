@@ -8,10 +8,48 @@ import {
   CartesianGrid,
 } from "recharts";
 
+function formatShortLabel(value) {
+  const text = String(value || "");
+  return text.length > 12 ? `${text.slice(0, 12)}...` : text;
+}
+
+function CustomTooltip({ active, payload }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const item = payload[0]?.payload;
+  if (!item) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        {item.fullLabel || item.label}
+      </p>
+      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+        Score: <span className="font-semibold text-slate-900 dark:text-slate-100">{item.score}%</span>
+      </p>
+      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+        Date: <span className="font-semibold text-slate-900 dark:text-slate-100">{item.displayDate || "Unknown"}</span>
+      </p>
+    </div>
+  );
+}
+
 export default function PerformanceChart({ data = [] }) {
   const chartData = data.map((item, index) => ({
     ...item,
-    label: String(item?.label || `Attempt ${index + 1}`),
+    fullLabel: String(item?.label || `Attempt ${index + 1}`),
+    label: formatShortLabel(item?.label || `Attempt ${index + 1}`),
+    displayDate: item?.date
+      ? new Date(item.date).toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "",
   }));
 
   if (!chartData.length) {
@@ -22,11 +60,6 @@ export default function PerformanceChart({ data = [] }) {
     );
   }
 
-  const compactLabel = (value) => {
-    const text = String(value || "");
-    return text.length > 14 ? `${text.slice(0, 14)}...` : text;
-  };
-
   return (
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 40 }}>
@@ -35,12 +68,12 @@ export default function PerformanceChart({ data = [] }) {
         <XAxis
           dataKey="label"
           stroke="#8884d8"
-          interval={0}
+          interval="preserveStartEnd"
           height={56}
-          angle={-12}
+          angle={-45}
           textAnchor="end"
           tick={{ fontSize: 12 }}
-          tickFormatter={compactLabel}
+          minTickGap={18}
         />
 
         <YAxis
@@ -49,7 +82,7 @@ export default function PerformanceChart({ data = [] }) {
           tick={{ fontSize: 12 }}
         />
 
-        <Tooltip />
+        <Tooltip content={<CustomTooltip />} />
 
         <Line
           type="monotone"

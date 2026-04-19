@@ -36,6 +36,7 @@ export default function Header({
       case "live": return "Live Monitoring";
       case "analytics": return "Results & Analytics";
       case "reports": return "Reports & Logs";
+      case "support": return "Support Tickets";
       case "certificates": return "Certificate Issuance";
       case "settings": return "System Settings";
       default: return "Admin Dashboard";

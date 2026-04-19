@@ -50,6 +50,43 @@ const adminService = {
     return res.data;
   },
 
+  getProgrammingExams: async (search = "") => {
+    const res = await api.get("/admin/programming-exams", { params: { search } });
+    return res.data;
+  },
+
+  getProgrammingExam: async (examId) => {
+    const res = await api.get(`/admin/programming-exams/${examId}`);
+    return res.data;
+  },
+
+  getProgrammingExamAssignments: async (examId, search = "") => {
+    const res = await api.get(`/admin/programming-exams/${examId}/assignments`, {
+      params: { search },
+    });
+    return res.data;
+  },
+
+  updateProgrammingExamAssignments: async (examId, payload) => {
+    const res = await api.put(`/admin/programming-exams/${examId}/assignments`, payload);
+    return res.data;
+  },
+
+  createProgrammingExam: async (payload) => {
+    const res = await api.post("/admin/programming-exams", payload);
+    return res.data;
+  },
+
+  updateProgrammingExam: async (examId, payload) => {
+    const res = await api.put(`/admin/programming-exams/${examId}`, payload);
+    return res.data;
+  },
+
+  deleteProgrammingExam: async (examId) => {
+    const res = await api.delete(`/admin/programming-exams/${examId}`);
+    return res.data;
+  },
+
   createExam: async (payload) => {
     const res = await api.post("/admin/exams", payload);
     return res.data;
@@ -129,6 +166,36 @@ const adminService = {
 
   getLogs: async (params) => {
     const res = await api.get("/admin/logs", { params });
+    return res.data;
+  },
+
+  getSupportLogs: async (params) => {
+    const res = await api.get("/admin/support-logs", { params });
+    return res.data;
+  },
+
+  getTickets: async (params) => {
+    const res = await api.get("/admin/tickets", { params });
+    return res.data;
+  },
+
+  getTicketDetail: async (ticketId) => {
+    const res = await api.get(`/admin/tickets/${ticketId}`);
+    return res.data;
+  },
+
+  updateTicketStatus: async (ticketId, payload) => {
+    const res = await api.patch(`/admin/tickets/${ticketId}/status`, payload);
+    return res.data;
+  },
+
+  replyTicket: async (ticketId, payload) => {
+    const res = await api.post(`/admin/tickets/${ticketId}/replies`, payload);
+    return res.data;
+  },
+
+  replyAndUpdateTicket: async (ticketId, payload) => {
+    const res = await api.put(`/admin/tickets/${ticketId}/reply`, payload);
     return res.data;
   },
 

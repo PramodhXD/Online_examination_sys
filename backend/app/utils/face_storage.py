@@ -56,3 +56,28 @@ def delete_user_face_data(*, roll_number: str | None, email: str | None) -> None
                 model_file.unlink()
             except OSError:
                 pass
+
+
+def migrate_user_face_data(*, old_roll_number: str | None, new_roll_number: str | None) -> None:
+    old_key = _safe_segment(old_roll_number)
+    new_key = _safe_segment(new_roll_number)
+    if not old_key or not new_key or old_key == new_key:
+        return
+
+    backend_root = Path(__file__).resolve().parents[2]
+    faces_root = (backend_root / "faces").resolve()
+    templates_root = (backend_root / "face_templates").resolve()
+
+    old_dir = _safe_path(faces_root, old_key)
+    new_dir = _safe_path(faces_root, new_key)
+    if old_dir and new_dir and old_dir.exists() and old_dir.is_dir():
+        if new_dir.exists():
+            raise ValueError("Face data already exists for the new roll number")
+        old_dir.rename(new_dir)
+
+    old_model = _safe_path(templates_root, f"{old_key}.yml")
+    new_model = _safe_path(templates_root, f"{new_key}.yml")
+    if old_model and new_model and old_model.exists() and old_model.is_file():
+        if new_model.exists():
+            raise ValueError("Face template already exists for the new roll number")
+        old_model.rename(new_model)

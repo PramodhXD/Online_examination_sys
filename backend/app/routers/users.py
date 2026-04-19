@@ -3,8 +3,9 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 from app.core.subscription import (
@@ -15,6 +16,7 @@ from app.core.subscription import (
     normalize_plan,
 )
 from app.db.session import get_db
+from app.models.admin import AdminLog, AdminStudentMeta, SupportTicket
 from app.models.user import User
 from app.schemas.user import (
     ChangePasswordSchema,
@@ -25,13 +27,26 @@ from app.schemas.user import (
     RazorpayVerifyRequest,
     SubscriptionInfo,
     SubscriptionPlanUpdate,
+    SupportTicketCreate,
+    SupportTicketItem,
+    SupportTicketReplyItem,
+    SupportTicketResponse,
     UpdateProfileSchema,
+    UserProfileResponse,
 )
 from app.services.password_service import change_user_password
-from app.utils.face_storage import delete_user_face_data
+from app.services.notification_service import create_notification
+from app.utils.face_storage import delete_user_face_data, migrate_user_face_data
 from app.utils.jwt import get_current_user
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+def _normalize_ticket_status(status: str | None) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"open", "in_progress", "resolved", "closed"}:
+        return normalized
+    return "open"
 
 
 def _subscription_response(user: User) -> SubscriptionInfo:
@@ -48,11 +63,15 @@ def _subscription_response(user: User) -> SubscriptionInfo:
 
 
 def _effective_razorpay_key_id() -> str:
-    return RAZORPAY_KEY_ID or "rzp_test_checkout"
+    if not RAZORPAY_KEY_ID:
+        raise HTTPException(status_code=503, detail="Razorpay key is not configured")
+    return RAZORPAY_KEY_ID
 
 
 def _effective_razorpay_secret() -> str:
-    return RAZORPAY_KEY_SECRET or "local_no_deduction_secret"
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(status_code=503, detail="Razorpay secret is not configured")
+    return RAZORPAY_KEY_SECRET
 
 
 def _compute_signature(order_id: str, payment_id: str) -> str:
@@ -63,6 +82,28 @@ def _compute_signature(order_id: str, payment_id: str) -> str:
         digestmod="sha256",
     ).hexdigest()
     return digest
+
+
+async def _get_or_create_student_meta(db: AsyncSession, user_id: int) -> AdminStudentMeta:
+    meta = (
+        await db.execute(
+            select(AdminStudentMeta).where(AdminStudentMeta.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+
+    if meta:
+        return meta
+
+    meta = AdminStudentMeta(
+        user_id=user_id,
+        department="General",
+        batch="2024-28",
+        blocked=False,
+        face_status="not_registered",
+    )
+    db.add(meta)
+    await db.flush()
+    return meta
 
 
 @router.delete("/delete-account")
@@ -83,7 +124,7 @@ async def delete_account(
     return {"message": "Account deleted"}
 
 
-@router.get("/me")
+@router.get("/me", response_model=UserProfileResponse)
 async def get_profile(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -94,11 +135,19 @@ async def get_profile(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    meta = await _get_or_create_student_meta(db, user.id)
+    await db.commit()
+    face_verified = str(meta.face_status or "").strip().lower() == "verified"
+
     return {
         "id": user.id,
         "name": user.name,
         "email": user.email,
+        "face_verified": face_verified,
+        "face_verification_date": meta.updated_at if face_verified else None,
         "roll_number": user.roll_number,
+        "course": meta.department,
+        "batch": meta.batch,
         "role": user.role,
         "subscription_plan": normalize_plan(user.subscription_plan),
     }
@@ -119,18 +168,41 @@ async def update_profile(
     normalized_name = " ".join((profile_data.name or "").split())
     if not normalized_name:
         raise HTTPException(status_code=400, detail="Name is required")
+    normalized_roll = str(profile_data.roll_number or "").strip()
+    if not normalized_roll:
+        raise HTTPException(status_code=400, detail="Roll number is required")
+    normalized_course = " ".join((profile_data.course or "").split())
+    if not normalized_course:
+        raise HTTPException(status_code=400, detail="Course is required")
+    normalized_batch = " ".join((profile_data.batch or "").split())
+    if not normalized_batch:
+        raise HTTPException(status_code=400, detail="Batch is required")
 
-    duplicate = await db.execute(
+    duplicate_roll = await db.execute(
         select(User).where(
             User.id != user.id,
             User.is_deleted.is_(False),
-            func.lower(func.trim(User.name)) == normalized_name.lower(),
+            User.roll_number == normalized_roll,
         )
     )
-    if duplicate.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Name already exists")
+    if duplicate_roll.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Roll number already exists")
 
+    previous_roll = str(user.roll_number or "").strip()
+    meta = await _get_or_create_student_meta(db, user.id)
     user.name = normalized_name
+    user.roll_number = normalized_roll
+    meta.department = normalized_course
+    meta.batch = normalized_batch
+
+    try:
+        migrate_user_face_data(
+            old_roll_number=previous_roll,
+            new_roll_number=normalized_roll,
+        )
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
 
     await db.commit()
     await db.refresh(user)
@@ -138,6 +210,9 @@ async def update_profile(
     return {
         "message": "Profile updated successfully",
         "name": user.name,
+        "roll_number": user.roll_number,
+        "course": meta.department,
+        "batch": meta.batch,
     }
 
 
@@ -280,3 +355,96 @@ async def verify_razorpay_payment(
         await db.refresh(user)
 
     return _subscription_response(user)
+
+
+@router.post("/support-tickets", response_model=SupportTicketResponse)
+async def create_support_ticket(
+    payload: SupportTicketCreate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = (await db.execute(select(User).where(User.id == current_user["id"]))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    ticket_id = f"SUP-{uuid.uuid4().hex[:8].upper()}"
+    submitted_at = datetime.utcnow()
+    log_message = (
+        f"[{ticket_id}] Student support ticket | "
+        f"user_id={user.id} | name={user.name} | email={user.email} | "
+        f"category={payload.category} | priority={payload.priority} | "
+        f"subject={payload.subject} | message={payload.message}"
+    )
+
+    db.add(
+        SupportTicket(
+            ticket_id=ticket_id,
+            user_id=user.id,
+            subject=payload.subject,
+            category=payload.category,
+            priority=payload.priority,
+            message=payload.message,
+            status="open",
+            created_at=submitted_at,
+            updated_at=submitted_at,
+        )
+    )
+    db.add(AdminLog(event_type="Support", message=log_message, created_at=submitted_at))
+    await create_notification(
+        db,
+        user_id=user.id,
+        title="Support ticket submitted",
+        message=(
+            f"Your ticket '{payload.subject}' has been created. "
+            "We will notify you when there is progress."
+        ),
+        notification_type="info",
+        link="/my-tickets",
+    )
+    await db.commit()
+
+    return SupportTicketResponse(
+        ticket_id=ticket_id,
+        message="Support ticket submitted successfully",
+        submitted_at=submitted_at,
+    )
+
+
+@router.get("/support-tickets", response_model=list[SupportTicketItem])
+async def list_my_support_tickets(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            select(SupportTicket)
+            .options(selectinload(SupportTicket.replies))
+            .where(SupportTicket.user_id == current_user["id"])
+            .order_by(SupportTicket.updated_at.desc(), SupportTicket.created_at.desc())
+        )
+    ).scalars().all()
+
+    return [
+        SupportTicketItem(
+            id=ticket.id,
+            ticket_id=ticket.ticket_id,
+            subject=ticket.subject,
+            category=ticket.category,
+            priority=ticket.priority,
+            message=ticket.message,
+            status=_normalize_ticket_status(ticket.status),
+            created_at=ticket.created_at,
+            updated_at=ticket.updated_at,
+            replies=[
+                SupportTicketReplyItem(
+                    id=reply.id,
+                    author_role=reply.author_role,
+                    author_name=reply.author_name,
+                    message=reply.message,
+                    created_at=reply.created_at,
+                )
+                for reply in ticket.replies
+            ],
+        )
+        for ticket in rows
+    ]

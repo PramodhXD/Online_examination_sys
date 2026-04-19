@@ -56,6 +56,14 @@ export default function ProfileSummaryCard() {
     setShowPasswordModal(true);
   };
 
+  const handleFaceRecapture = () => {
+    const studentEmail = (student?.email || "").trim();
+    if (!studentEmail) {
+      return;
+    }
+    navigate(`/face-capture?email=${encodeURIComponent(studentEmail)}&mode=update`);
+  };
+
   const submitPasswordChange = async (e) => {
     e.preventDefault();
     setPasswordError("");
@@ -143,7 +151,8 @@ export default function ProfileSummaryCard() {
       <div className="flex flex-wrap gap-3">
 
         <button
-          onClick={() => navigate("/student/face-verification")}
+          onClick={handleFaceRecapture}
+          disabled={!student?.email}
           className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-slate-700 text-sm font-medium hover:bg-gray-200 dark:hover:bg-slate-600 transition"
         >
           Re-verify Face

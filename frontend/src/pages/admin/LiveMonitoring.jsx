@@ -46,7 +46,7 @@ export default function LiveMonitoring() {
   }, [rows, searchTerm]);
   const online = rows.filter((r) => r.status === "Live").length;
   const flagged = rows.filter((r) => r.status === "Flagged").length;
-  const alerts = rows.reduce((acc, r) => acc + (r.tab_switches || 0), 0);
+  const alerts = rows.reduce((acc, r) => acc + (r.total_alerts || 0), 0);
 
   const flagSession = async (id) => {
     try {
@@ -111,7 +111,13 @@ export default function LiveMonitoring() {
                           <ShieldAlert className="w-3.5 h-3.5" />
                           {r.face_status === "ok" ? "Verified" : r.face_status === "warning" ? "Warning" : "Alert"}
                         </span>
-                        {r.tab_switches > 0 && <p className="text-[11px] text-slate-500 mt-1">Tab Switches: {r.tab_switches}</p>}
+                        {r.total_alerts > 0 && (
+                          <div className="mt-1 space-y-1 text-[11px] text-slate-500">
+                            <p>Alerts: {r.total_alerts}</p>
+                            <p>Tab: {r.tab_switches} | Fullscreen: {r.fullscreen_exits} | Webcam: {r.webcam_alerts}</p>
+                            {r.last_alert_message ? <p className="text-slate-600">{r.last_alert_message}</p> : null}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="w-36">
@@ -148,6 +154,11 @@ export default function LiveMonitoring() {
               <p className="text-slate-500">Session ID</p><p className="font-semibold text-slate-900">{selectedRow.session_code}</p>
               <p className="text-slate-500">Type</p><p className="font-semibold text-slate-900">{selectedRow.attempt_type}</p>
               <p className="text-slate-500">Progress</p><p className="font-semibold text-slate-900">{selectedRow.progress}%</p>
+              <p className="text-slate-500">Total Alerts</p><p className="font-semibold text-slate-900">{selectedRow.total_alerts || 0}</p>
+              <p className="text-slate-500">Tab Switches</p><p className="font-semibold text-slate-900">{selectedRow.tab_switches || 0}</p>
+              <p className="text-slate-500">Fullscreen Exits</p><p className="font-semibold text-slate-900">{selectedRow.fullscreen_exits || 0}</p>
+              <p className="text-slate-500">Webcam Alerts</p><p className="font-semibold text-slate-900">{selectedRow.webcam_alerts || 0}</p>
+              <p className="text-slate-500">Latest Alert</p><p className="font-semibold text-slate-900">{selectedRow.last_alert_message || "No alerts recorded"}</p>
               <p className="text-slate-500">Violation Status</p><p className={`font-semibold ${selectedRow.status === "Flagged" ? "text-orange-600" : "text-green-600"}`}>{selectedRow.status === "Flagged" ? "Violation Detected" : "Normal"}</p>
             </div>
             <div className="px-6 py-4 border-t border-slate-200 flex justify-end">

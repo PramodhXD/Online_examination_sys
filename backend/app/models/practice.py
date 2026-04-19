@@ -72,12 +72,6 @@ class PracticeQuestion(Base):
     # Relationships
     category = relationship("PracticeCategory", back_populates="questions")
 
-    answers = relationship(
-        "PracticeAnswer",
-        back_populates="question",
-        cascade="all, delete-orphan"
-    )
-
 
 # =====================================================
 # Practice Attempt
@@ -106,11 +100,19 @@ class PracticeAttempt(Base):
     correct_answers = Column(Integer, default=0)
     score = Column(Float, default=0)
     accuracy = Column(Float)
+    assigned_question_ids = Column(Text)
+    submit_reason = Column(String(30), default="manual")
 
     status = Column(String(20), default="in_progress")
 
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
+    tab_switches = Column(Integer, nullable=False, default=0)
+    fullscreen_exits = Column(Integer, nullable=False, default=0)
+    webcam_alerts = Column(Integer, nullable=False, default=0)
+    proctor_alert_count = Column(Integer, nullable=False, default=0)
+    last_proctor_event = Column(Text)
+    last_proctor_event_at = Column(DateTime)
 
     # Relationships
     user = relationship("User", back_populates="practice_attempts")
@@ -149,7 +151,8 @@ class PracticeAnswer(Base):
 
     selected_option = Column(Integer)
     is_correct = Column(Boolean)
+    time_taken_seconds = Column(Integer, default=0)
 
     # Relationships
     attempt = relationship("PracticeAttempt", back_populates="answers")
-    question = relationship("PracticeQuestion", back_populates="answers")
+    question = relationship("PracticeQuestion")

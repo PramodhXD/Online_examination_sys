@@ -11,4 +11,3 @@ app/logs/
 *.log
 
 .env
-!.env

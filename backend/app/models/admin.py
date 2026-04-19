@@ -99,3 +99,39 @@ class AdminSetting(Base):
     key = Column(String(100), unique=True, nullable=False)
     value = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(String(20), unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    subject = Column(String(120), nullable=False)
+    category = Column(String(50), default="general")
+    priority = Column(String(20), default="medium")
+    message = Column(Text, nullable=False)
+    status = Column(String(30), default="open")
+    admin_reply = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    replies = relationship(
+        "SupportTicketReply",
+        back_populates="ticket",
+        cascade="all, delete-orphan",
+        order_by="SupportTicketReply.created_at.asc()",
+    )
+
+
+class SupportTicketReply(Base):
+    __tablename__ = "support_ticket_replies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("support_tickets.id", ondelete="CASCADE"), nullable=False)
+    author_role = Column(String(20), default="admin")
+    author_name = Column(String(120), nullable=False)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ticket = relationship("SupportTicket", back_populates="replies")

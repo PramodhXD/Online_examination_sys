@@ -80,6 +80,13 @@ class PracticeAnswerSubmit(BaseModel):
 class PracticeSubmitRequest(BaseModel):
     attempt_id: Optional[int] = None
     answers: List[PracticeAnswerSubmit]
+    question_times: Optional[List[int]] = None
+    submit_reason: Optional[str] = None
+
+
+class PracticeProctoringEvent(BaseModel):
+    event_type: str
+    message: Optional[str] = None
 
 
 class PracticeSubmitResponse(BaseModel):
@@ -89,3 +96,32 @@ class PracticeSubmitResponse(BaseModel):
     wrong_answers: int
     score: float
     accuracy: float
+
+
+class PracticeReviewQuestion(BaseModel):
+    id: int
+    order: int
+    question_text: str
+    options: List[str]
+    user_answer: Optional[int] = None
+    user_answer_text: Optional[str] = None
+    correct_answer: int
+    correct_answer_text: str
+    is_correct: bool
+    time_taken_seconds: int = 0
+
+
+class PracticeAttemptReview(BaseModel):
+    attempt_id: int
+    category_id: int
+    practice_title: str
+    status: str
+    submission_reason: str = "manual"
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    score: float
+    percentage: float
+    total_questions: int
+    correct_answers: int
+    wrong_answers: int
+    questions: List[PracticeReviewQuestion]

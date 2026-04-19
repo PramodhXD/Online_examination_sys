@@ -8,13 +8,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/auth': backendTarget,
-      '/users': backendTarget,
-      '/practice': backendTarget,
-      '/assessment': backendTarget,
-      '/dashboard': backendTarget,
-      '/admin': backendTarget,
-      '/face': backendTarget,
+      '/api': backendTarget,
     },
   },
 })

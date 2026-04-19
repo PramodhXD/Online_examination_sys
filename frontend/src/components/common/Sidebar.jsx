@@ -1,32 +1,38 @@
 import {
+  useState,
+} from "react";
+import {
   LayoutDashboard,
-  BookOpen,
-  ClipboardCheck,
   BarChart2,
   Trophy,
   Award,
   User,
   LogOut,
   CreditCard,
+  LifeBuoy,
+  MessageSquare,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 
 export default function Sidebar({ collapsed }) {
   const navigate = useNavigate();
+  const { logout } = useAuth();
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const menuItems = [
     { name: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
-    { name: "Practice", icon: BookOpen, path: "/practice" },
-    { name: "Assessments", icon: ClipboardCheck, path: "/assessments" },
     { name: "History", icon: BarChart2, path: "/performance" },
     { name: "Leaderboard", icon: Trophy, path: "/leaderboard" },
     { name: "Certificates", icon: Award, path: "/certificates" },
     { name: "Subscription", icon: CreditCard, path: "/subscription" },
+    { name: "Help & Support", icon: LifeBuoy, path: "/support" },
+    { name: "My Tickets", icon: MessageSquare, path: "/my-tickets" },
     { name: "Profile", icon: User, path: "/profile" },
   ];
 
   const handleLogout = () => {
-    localStorage.clear();
+    logout();
     navigate("/login");
   };
 
@@ -80,7 +86,7 @@ export default function Sidebar({ collapsed }) {
 
       <div className="p-3 border-t border-gray-200 dark:border-slate-700">
         <button
-          onClick={handleLogout}
+          onClick={() => setShowLogoutModal(true)}
           className="group flex items-center gap-4 w-full px-4 py-3 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition relative"
         >
           <LogOut size={20} />
@@ -98,6 +104,36 @@ export default function Sidebar({ collapsed }) {
           )}
         </button>
       </div>
+
+      {showLogoutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Confirm Logout
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Are you sure you want to exit?
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowLogoutModal(false)}
+                className="rounded-lg border px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

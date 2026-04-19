@@ -4,7 +4,6 @@ import StatCard from "./StatCard";
 export default function StatsSection({ dashboardData, onRankClick }) {
   if (!dashboardData) return null;
 
-  // Safe fallback values
   const totalExams = dashboardData.total_exams ?? 0;
   const averageScore = dashboardData.average_score ?? 0;
   const highestScore = dashboardData.highest_score ?? 0;
@@ -15,36 +14,56 @@ export default function StatsSection({ dashboardData, onRankClick }) {
       title: "Total Exams",
       value: totalExams,
       subtitle: "Completed exams",
-      icon: <FileText className="w-5 h-5 text-white" />,
-      color: "bg-blue-500",
+      icon: <FileText className="h-4 w-4 text-blue-600" />,
+      color: "bg-blue-100",
     },
     {
-      title: "Average Score",
+      title: "Avg Score",
       value: `${Number(averageScore).toFixed(1)}%`,
       subtitle: "Across all exams",
-      icon: <BarChart3 className="w-5 h-5 text-white" />,
-      color: "bg-purple-500",
+      icon: <BarChart3 className="h-4 w-4 text-purple-600" />,
+      color: "bg-purple-100",
     },
     {
-      title: "Highest Score",
+      title: "High Score",
       value: `${Number(highestScore).toFixed(1)}%`,
       subtitle: "Best performance",
-      icon: <Trophy className="w-5 h-5 text-white" />,
-      color: "bg-green-500",
+      icon: <Trophy className="h-4 w-4 text-green-600" />,
+      color: "bg-green-100",
     },
     {
       title: "Rank",
       value: rank ? `#${rank}` : "-",
-      subtitle: "In your batch (click to view leaderboard)",
-      icon: <Medal className="w-5 h-5 text-white" />,
-      color: "bg-yellow-500",
+      subtitle: "Batch standing",
+      icon: <Medal className="h-4 w-4 text-yellow-600" />,
+      color: "bg-yellow-100",
       onClick: onRankClick,
       clickable: true,
+      action: onRankClick ? (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRankClick();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onRankClick();
+            }
+          }}
+          className="inline-flex items-center whitespace-nowrap text-[11px] font-semibold text-blue-600 transition hover:text-blue-700"
+        >
+          Leaderboard <span className="ml-1" aria-hidden="true">-&gt;</span>
+        </span>
+      ) : null,
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div className="contents">
       {stats.map((stat, index) => (
         <StatCard
           key={index}
@@ -55,6 +74,7 @@ export default function StatsSection({ dashboardData, onRankClick }) {
           color={stat.color}
           onClick={stat.onClick}
           clickable={stat.clickable}
+          action={stat.action}
         />
       ))}
     </div>

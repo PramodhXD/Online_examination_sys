@@ -30,6 +30,14 @@ export default function ProfileSummaryCard() {
     return null; // or add loading spinner
   }
 
+  const handleFaceRecapture = () => {
+    const studentEmail = (student?.email || "").trim();
+    if (!studentEmail) {
+      return;
+    }
+    navigate(`/face-capture?email=${encodeURIComponent(studentEmail)}&mode=update`);
+  };
+
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl border dark:border-slate-700 shadow-sm p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 transition">
 
@@ -93,7 +101,8 @@ export default function ProfileSummaryCard() {
       <div className="flex flex-wrap gap-3">
 
         <button
-          onClick={() => navigate("/student/face-verification")}
+          onClick={handleFaceRecapture}
+          disabled={!student?.email}
           className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-slate-700 text-sm font-medium hover:bg-gray-200 dark:hover:bg-slate-600 transition"
         >
           Re-verify Face

@@ -12,7 +12,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     email: Mapped[str] = mapped_column(String(100), unique=True, index=True)
-    roll_number: Mapped[str] = mapped_column(String(50), unique=True)
+    roll_number: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
 
     role: Mapped[str] = mapped_column(String(20), default="student")
@@ -22,3 +22,10 @@ class User(Base):
 
     attempts = relationship("AssessmentAttempt", back_populates="user")
     practice_attempts = relationship("PracticeAttempt", back_populates="user")
+    programming_attempts = relationship("ProgrammingAttempt", back_populates="user")
+    notifications = relationship(
+        "Notification",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="desc(Notification.created_at)",
+    )

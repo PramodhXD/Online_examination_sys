@@ -14,6 +14,8 @@ export default function FaceVerification() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const categoryId = params.get("category");
+  const attemptId = params.get("attempt");
+  const resume = params.get("resume");
 
   const email =
     localStorage.getItem("userEmail") ||
@@ -95,7 +97,10 @@ export default function FaceVerification() {
       if (res.verified) {
         sessionStorage.setItem("faceVerified", "true");
         if (categoryId) {
-          navigate(`/assessment/start?category=${categoryId}`);
+          const query = new URLSearchParams({ category: categoryId });
+          if (attemptId) query.set("attempt", attemptId);
+          if (resume === "1") query.set("resume", "1");
+          navigate(`/assessment/start?${query.toString()}`);
         } else {
           navigate("/dashboard");
         }

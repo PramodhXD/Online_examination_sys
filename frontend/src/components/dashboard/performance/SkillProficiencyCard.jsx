@@ -1,4 +1,6 @@
-import { TrendingUp, Sparkles } from "lucide-react";
+import { Download, TrendingUp } from "lucide-react";
+import WeakAreaAlert from "./WeakAreaAlert";
+import PerformanceCoach from "./PerformanceCoach";
 
 export default function SkillProficiencyCard({
   skills = [],
@@ -22,6 +24,7 @@ export default function SkillProficiencyCard({
   const strongest = skillData.length
     ? skillData.reduce((max, s) => (s.value > max.value ? s : max))
     : null;
+  const weakSkills = skillData.filter((skill) => skill.value < 40);
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border dark:border-slate-700 p-6 transition">
@@ -53,22 +56,10 @@ export default function SkillProficiencyCard({
         ))}
       </div>
 
-      {/* AI Recommendation */}
-      {weakest && strongest && (
-        <div className="mt-8 bg-blue-50 dark:bg-slate-700 border border-blue-100 dark:border-slate-600 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-4 h-4 text-blue-600" />
-            <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400">
-              AI Recommendation
-            </h4>
-          </div>
-
-          <p className="text-sm text-gray-600 dark:text-gray-300">
-            Focus more on <strong>{weakest.name}</strong>.  
-            You're performing strongest in <strong>{strongest.name}</strong>!
-          </p>
-        </div>
-      )}
+      <div className="mt-8 space-y-4">
+        <WeakAreaAlert weakSkills={weakSkills} />
+        <PerformanceCoach strongestSkill={strongest} weakestSkill={weakest} />
+      </div>
 
       {/* Divider */}
       <div className="my-6 border-t dark:border-slate-600"></div>
@@ -80,7 +71,10 @@ export default function SkillProficiencyCard({
         disabled={downloadingReport}
         className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-70 disabled:cursor-not-allowed text-white py-3 rounded-xl font-medium transition"
       >
-        {downloadingReport ? "Preparing PDF..." : "Download Report (PDF)"}
+        <span className="inline-flex items-center justify-center gap-2">
+          <Download className="h-4 w-4" />
+          {downloadingReport ? "Preparing PDF..." : "Download Report (PDF)"}
+        </span>
       </button>
 
     </div>

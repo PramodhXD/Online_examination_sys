@@ -3,6 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import * as Motion from "framer-motion";
 import DashboardLayout from "../../components/dashboard/layout/DashboardLayout";
+import CoursePicker from "../../components/common/CoursePicker";
+import { useAuth } from "../../hooks/useAuth";
+import {
+  CUSTOM_COURSE_VALUE,
+  isPresetCourse,
+} from "../../constants/courseOptions";
 import {
   changePassword,
   deleteAccount,
@@ -12,6 +18,7 @@ import {
 
 export default function Profile() {
   const navigate = useNavigate();
+  const { updateUser } = useAuth();
 
   const [profile, setProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -26,6 +33,10 @@ export default function Profile() {
 
   const [formData, setFormData] = useState({
     name: "",
+    roll_number: "",
+    course: "",
+    customCourse: "",
+    batch: "",
   });
   const [passwordForm, setPasswordForm] = useState({
     current_password: "",
@@ -33,6 +44,8 @@ export default function Profile() {
     confirm_password: "",
   });
   const [avatarUrl, setAvatarUrl] = useState("");
+
+  const isFaceVerified = Boolean(profile?.face_verified);
 
   const getAvatarStorageKey = (email) =>
     email ? `user_avatar_${email.toLowerCase()}` : "user_avatar";
@@ -43,7 +56,13 @@ export default function Profile() {
       try {
         const data = await getProfile();
         setProfile(data);
-        setFormData({ name: data.name });
+        setFormData({
+          name: data.name || "",
+          roll_number: data.roll_number || "",
+          course: isPresetCourse(data.course) ? data.course : (data.course ? CUSTOM_COURSE_VALUE : ""),
+          customCourse: isPresetCourse(data.course) ? "" : (data.course || ""),
+          batch: data.batch || "",
+        });
         setAvatarUrl(localStorage.getItem(getAvatarStorageKey(data.email)) || "");
       } catch { void 0; } finally {
         setLoadingProfile(false);
@@ -55,16 +74,35 @@ export default function Profile() {
 
   const handleUpdate = async () => {
     try {
-      await updateProfile({ name: formData.name });
+      const normalizedCourse =
+        formData.course === CUSTOM_COURSE_VALUE
+          ? formData.customCourse
+          : formData.course;
 
-      setProfile((prev) => ({
-        ...prev,
+      const response = await updateProfile({
         name: formData.name,
-      }));
+        roll_number: formData.roll_number,
+        course: normalizedCourse,
+        batch: formData.batch,
+      });
+
+      const nextProfile = {
+        ...(profile || {}),
+        name: response.name,
+        roll_number: response.roll_number,
+        course: response.course,
+        batch: response.batch,
+      };
+      setProfile(nextProfile);
+      updateUser(nextProfile);
 
       setShowEditModal(false);
-    } catch {
-      alert("Failed to update profile");
+    } catch (error) {
+      alert(
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Failed to update profile"
+      );
     }
   };
 
@@ -224,9 +262,12 @@ export default function Profile() {
               {profile?.email}
             </p>
 
-            <span className="mt-3 inline-block bg-green-500 
-                             text-white text-xs px-3 py-1 rounded-full">
-              Face Verified
+            <span
+              className={`mt-3 inline-block text-white text-xs px-3 py-1 rounded-full ${
+                isFaceVerified ? "bg-green-500" : "bg-red-500"
+              }`}
+            >
+              {isFaceVerified ? "Verified" : "Not Verified"}
             </span>
           </div>
         </Motion.motion.div>
@@ -242,6 +283,20 @@ export default function Profile() {
               <p className="text-gray-500">Roll Number</p>
               <p className="font-medium text-gray-800">
                 {profile?.roll_number}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-gray-500">Course</p>
+              <p className="font-medium text-gray-800">
+                {profile?.course || "Not added yet"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-gray-500">Batch</p>
+              <p className="font-medium text-gray-800">
+                {profile?.batch || "Not added yet"}
               </p>
             </div>
 
@@ -264,7 +319,7 @@ export default function Profile() {
                        font-medium hover:bg-blue-700 transition 
                        hover:scale-105 active:scale-95"
           >
-            Edit Name
+            Edit Profile
           </button>
 
           <div className="flex items-center gap-5">
@@ -312,14 +367,62 @@ export default function Profile() {
               className="bg-white rounded-2xl p-6 w-[400px] shadow-2xl"
             >
               <h3 className="text-lg font-semibold mb-4">
-                Edit Name
+                Edit Profile
               </h3>
 
+              <label className="block text-sm font-medium mb-1">
+                Name
+              </label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, name: e.target.value }))
+                }
+                  className="w-full border rounded-lg p-2"
+                />
+
+              <label className="block text-sm font-medium mt-4 mb-1">
+                Roll Number
+              </label>
               <input
                 type="text"
-                value={formData.name}
+                value={formData.roll_number}
                 onChange={(e) =>
-                  setFormData({ name: e.target.value })
+                  setFormData((prev) => ({ ...prev, roll_number: e.target.value }))
+                }
+                className="w-full border rounded-lg p-2"
+              />
+
+              <CoursePicker
+                id="profile-course"
+                label="Course"
+                value={formData.course}
+                customValue={formData.customCourse}
+                onSelect={(nextValue) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    course: nextValue,
+                    customCourse:
+                      nextValue === CUSTOM_COURSE_VALUE ? prev.customCourse : "",
+                  }))
+                }
+                onCustomChange={(nextValue) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    customCourse: nextValue,
+                  }))
+                }
+              />
+
+              <label className="block text-sm font-medium mt-4 mb-1">
+                Batch
+              </label>
+              <input
+                type="text"
+                value={formData.batch}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, batch: e.target.value }))
                 }
                 className="w-full border rounded-lg p-2"
               />

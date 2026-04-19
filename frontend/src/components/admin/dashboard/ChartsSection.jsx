@@ -44,17 +44,17 @@ export default function ChartsSection({ analytics = [] }) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 min-w-0">
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 min-w-0">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Exam Participation</h3>
-            <p className="text-sm text-slate-500">Number of students attempting exams</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Exam Participation</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Number of students attempting exams</p>
           </div>
         </div>
         <div className="h-[300px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={participationData} margin={{ top: 8, right: 8, left: 0, bottom: 50 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2937" />
               <XAxis
                 dataKey="name"
                 axisLine={false}
@@ -68,10 +68,10 @@ export default function ChartsSection({ analytics = [] }) {
               />
               <YAxis axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
               <Tooltip
-                cursor={{ fill: "#f8fafc" }}
+                cursor={{ fill: "#0b1220" }}
                 formatter={(value) => [value, "Attempts"]}
                 labelFormatter={(label) => `Exam: ${label}`}
-                contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)" }}
+                contentStyle={{ borderRadius: "12px", border: "1px solid #1f2937", background: "#0f172a", color: "#e2e8f0", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.35)" }}
               />
               <Bar dataKey="value" fill="#2563eb" radius={[4, 4, 0, 0]} barSize={32} />
             </BarChart>
@@ -79,14 +79,14 @@ export default function ChartsSection({ analytics = [] }) {
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 min-w-0">
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 min-w-0">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Average Scores by Exam</h3>
-            <p className="text-sm text-slate-500">Performance comparison across exams</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Average Scores by Exam</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Performance comparison across exams</p>
           </div>
           <div className="flex gap-2">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 rounded-lg text-xs font-bold">
               <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
               Average Score
             </div>
@@ -95,7 +95,7 @@ export default function ChartsSection({ analytics = [] }) {
         <div className="h-[300px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={performanceData} margin={{ top: 8, right: 8, left: 0, bottom: 50 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1f2937" />
               <XAxis
                 dataKey="name"
                 axisLine={false}
@@ -111,7 +111,7 @@ export default function ChartsSection({ analytics = [] }) {
               <Tooltip
                 formatter={(value) => [`${Number(value).toFixed(2)}%`, "Average Score"]}
                 labelFormatter={(label) => `Exam: ${label}`}
-                contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)" }}
+                contentStyle={{ borderRadius: "12px", border: "1px solid #1f2937", background: "#0f172a", color: "#e2e8f0", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.35)" }}
               />
               <Bar dataKey="avg" fill="#2563eb" radius={[4, 4, 0, 0]} barSize={32} />
             </BarChart>

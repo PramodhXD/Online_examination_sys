@@ -15,6 +15,7 @@ export default function PracticeResult() {
   }
 
   const {
+    attemptId,
     total,
     attempted,
     correct,
@@ -84,6 +85,13 @@ export default function PracticeResult() {
 
         {/* ACTIONS */}
         <div className="flex justify-center gap-4 mt-10">
+          <button
+            onClick={() => navigate(`/practice/review?attempt=${attemptId || ""}`)}
+            className="px-6 py-2 border rounded-lg"
+          >
+            Review Answers
+          </button>
+
           <button
             onClick={() => navigate("/practice")}
             className="px-6 py-2 border rounded-lg"

@@ -6,7 +6,7 @@ import { ImageWithFallback } from "./ImageWithFallback";
 
 function Hero() {
   return (
-    <section className="relative bg-white pt-16 pb-24 lg:pt-32 lg:pb-48 overflow-hidden">
+    <section className="relative bg-white pt-8 pb-24 lg:pt-14 lg:pb-48 overflow-hidden">
       <div className="container mx-auto px-4 sm:px-6 lg:px-12">
         <div className="lg:grid lg:grid-cols-12 lg:gap-24 items-center">
 

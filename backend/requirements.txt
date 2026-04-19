@@ -26,6 +26,8 @@ Pillow
 # Utilities
 python-dotenv
 requests
+celery[redis]
+redis
 
 # Certificate & QR Code
 qrcode

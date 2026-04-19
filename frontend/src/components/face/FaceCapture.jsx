@@ -17,7 +17,20 @@ export default function FaceCapture() {
   const location = useLocation();
 
   const params = new URLSearchParams(location.search);
-  const email = params.get("email");
+  const queryEmail = params.get("email");
+  const mode = (params.get("mode") || "").toLowerCase();
+  const isUpdateMode = mode === "update";
+  const storedEmail =
+    localStorage.getItem("userEmail") ||
+    (() => {
+      try {
+        const authUser = localStorage.getItem("auth_user");
+        return authUser ? JSON.parse(authUser)?.email || "" : "";
+      } catch {
+        return "";
+      }
+    })();
+  const email = queryEmail || storedEmail;
 
   const [images, setImages] = useState([]);
   const [capturing, setCapturing] = useState(false);
@@ -25,13 +38,28 @@ export default function FaceCapture() {
   const [error, setError] = useState("");
 
   const mapFaceError = (detail) => {
+    if (Array.isArray(detail)) {
+      const firstMessage =
+        detail.find((item) => typeof item === "string") ||
+        detail.find((item) => typeof item?.msg === "string")?.msg;
+      if (firstMessage) return mapFaceError(firstMessage);
+      return "Failed to process face capture";
+    }
+    if (typeof detail === "object" && detail !== null) {
+      if (typeof detail.detail === "string") return mapFaceError(detail.detail);
+      if (typeof detail.message === "string") return mapFaceError(detail.message);
+      if (typeof detail.msg === "string") return mapFaceError(detail.msg);
+      return "Failed to process face capture";
+    }
     if (detail === "face_not_detected") {
       return "No face detected. Keep your face centered and retry.";
     }
     if (detail === "multiple_faces") {
       return "Multiple faces detected. Make sure only one person is visible.";
     }
-    return typeof detail === "string" ? detail : "Failed to process face capture";
+    return typeof detail === "string"
+      ? detail
+      : "Failed to process face capture";
   };
 
   /* 🎥 Start camera */
@@ -120,9 +148,9 @@ export default function FaceCapture() {
         await createFaceTemplate(email);
       }
 
-      navigate("/login");
+      navigate(isUpdateMode ? "/dashboard" : "/login");
     } catch (err) { void err;
-      const detail = err?.response?.data?.detail;
+      const detail = err?.response?.data?.detail ?? err?.response?.data;
       setError(mapFaceError(detail));
     } finally {
       setUploading(false);
@@ -141,9 +169,15 @@ export default function FaceCapture() {
           Please look straight at the camera. Photos will be captured automatically.
         </p>
 
-        {email && (
+          {email && (
           <p className="text-center text-xs text-slate-400 mt-2">
             User: <span className="font-medium">{email}</span>
+          </p>
+        )}
+
+        {isUpdateMode && (
+          <p className="text-center text-xs text-blue-600 mt-1">
+            Updating your registered face will replace old saved face images.
           </p>
         )}
 

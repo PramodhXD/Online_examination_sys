@@ -7,8 +7,39 @@ import RecentAssessmentsSection from "../../components/dashboard/assessments/Rec
 import ProfileSummaryCard from "../../components/dashboard/ProfileSummaryCard";
 import OverallAccuracyCard from "../../components/dashboard/stats/OverallAccuracyCard";
 import SkillProficiencyCard from "../../components/dashboard/performance/SkillProficiencyCard";
+import WeeklyProgressCard from "../../components/dashboard/stats/WeeklyProgressCard";
 
 import dashboardService from "../../services/dashboardService";
+
+function calculateWeeklyImprovement(performanceOverview = []) {
+  if (!Array.isArray(performanceOverview) || performanceOverview.length < 2) {
+    return 0;
+  }
+
+  const scores = performanceOverview
+    .map((item) => Number(item?.score))
+    .filter((score) => !Number.isNaN(score));
+
+  if (scores.length < 2) {
+    return 0;
+  }
+
+  const recentSlice = scores.slice(-3);
+  const previousSlice = scores.slice(-6, -3);
+
+  const currentAverage =
+    recentSlice.reduce((sum, score) => sum + score, 0) / recentSlice.length;
+  const previousAverage =
+    previousSlice.length > 0
+      ? previousSlice.reduce((sum, score) => sum + score, 0) / previousSlice.length
+      : scores[0];
+
+  if (!previousAverage) {
+    return currentAverage;
+  }
+
+  return currentAverage - previousAverage;
+}
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
@@ -73,6 +104,10 @@ export default function StudentDashboard() {
     }
   };
 
+  const weeklyImprovement = calculateWeeklyImprovement(
+    dashboard.performance_overview || []
+  );
+
   // ================= MAIN DASHBOARD =================
   return (
     <DashboardLayout title="Dashboard">
@@ -94,21 +129,15 @@ export default function StudentDashboard() {
         </div>
 
         {/* ================= STATS + ACCURACY ================= */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
-
-          {/* Stats Section */}
-          <div className="lg:col-span-3">
-            <StatsSection
-              dashboardData={dashboard}
-              onRankClick={() => navigate("/leaderboard")}
-            />
-          </div>
-
-          {/* Overall Accuracy */}
+        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+          <StatsSection
+            dashboardData={dashboard}
+            onRankClick={() => navigate("/leaderboard")}
+          />
           <OverallAccuracyCard
             accuracy={dashboard.overall_accuracy || 0}
           />
-
+          <WeeklyProgressCard improvement={weeklyImprovement} />
         </div>
 
         {/* ================= PERFORMANCE + RECENT + SKILLS ================= */}

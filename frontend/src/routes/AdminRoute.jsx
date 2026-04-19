@@ -1,8 +1,9 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 export default function AdminRoute({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) return null;
 
@@ -11,7 +12,7 @@ export default function AdminRoute({ children }) {
   }
 
   if (user.role !== "admin") {
-    return <Navigate to="/dashboard" />;
+    return <Navigate to="/access-denied" replace state={{ from: location }} />;
   }
 
   return children;

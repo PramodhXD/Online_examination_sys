@@ -1,8 +1,8 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, TIMESTAMP, Boolean, text
-from sqlalchemy.sql import func
-from app.db.base import Base
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, TIMESTAMP, text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
+from app.db.base import Base
 
 
 class AssessmentCategory(Base):
@@ -42,7 +42,6 @@ class AssessmentQuestion(Base):
     answers = relationship("AssessmentAnswer", back_populates="question")
 
 
-
 class AssessmentAttempt(Base):
     __tablename__ = "assessment_attempt"
 
@@ -53,17 +52,29 @@ class AssessmentAttempt(Base):
 
     score = Column(Integer, default=0)
     total = Column(Integer)
-    accuracy = Column(Integer)  # 👈 ADD THIS (important for dashboard)
-
+    accuracy = Column(Integer)
+    assigned_question_ids = Column(Text)
     started_at = Column(TIMESTAMP, server_default=func.now())
+    duration_minutes = Column(Integer, nullable=False, default=60, server_default="60")
     completed_at = Column(TIMESTAMP)
     status = Column(String(20), default="in_progress")
-    certificate_issued_by_admin = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    submit_reason = Column(String(30), default="manual", server_default="manual")
+    tab_switches = Column(Integer, nullable=False, default=0, server_default="0")
+    fullscreen_exits = Column(Integer, nullable=False, default=0, server_default="0")
+    webcam_alerts = Column(Integer, nullable=False, default=0, server_default="0")
+    proctor_alert_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_proctor_event = Column(Text)
+    last_proctor_event_at = Column(TIMESTAMP)
+    certificate_issued_by_admin = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
 
     user = relationship("User", back_populates="attempts")
     category = relationship("AssessmentCategory", back_populates="attempts")
     answers = relationship("AssessmentAnswer", back_populates="attempt")
-
 
 
 class AssessmentAnswer(Base):
@@ -76,9 +87,8 @@ class AssessmentAnswer(Base):
 
     selected_option = Column(Integer)
     is_correct = Column(Boolean)
+    time_taken_seconds = Column(Integer, default=0, server_default="0")
+    question_order = Column(Integer, default=0, server_default="0")
 
     attempt = relationship("AssessmentAttempt", back_populates="answers")
     question = relationship("AssessmentQuestion", back_populates="answers")
-
-
-

@@ -85,6 +85,78 @@ class ExamResponse(BaseModel):
     status: str
 
 
+class ProgrammingTestCasePayload(BaseModel):
+    input_data: str = ""
+    expected_output: str = ""
+    is_sample: bool = False
+    marks: int = 1
+
+
+class ProgrammingProblemPayload(BaseModel):
+    title: str
+    difficulty: str = "Easy"
+    statement: str
+    input_format: str = ""
+    output_format: str = ""
+    constraints: str = ""
+    sample_input: str = ""
+    sample_output: str = ""
+    starter_code: str = ""
+    test_cases: Optional[List[ProgrammingTestCasePayload]] = None
+
+
+class ProgrammingExamCreate(BaseModel):
+    title: str
+    description: str = ""
+    duration_minutes: int = 90
+    total_marks: Optional[int] = None
+    status: str = "draft"
+    problem: ProgrammingProblemPayload
+
+
+class ProgrammingExamUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    total_marks: Optional[int] = None
+    status: Optional[str] = None
+    problem: Optional[ProgrammingProblemPayload] = None
+
+
+class ProgrammingTestCaseAdmin(BaseModel):
+    id: int
+    input_data: str
+    expected_output: str
+    is_sample: bool
+    marks: int
+
+
+class ProgrammingProblemAdmin(BaseModel):
+    id: int
+    title: str
+    difficulty: str
+    statement: str
+    input_format: str
+    output_format: str
+    constraints: str
+    sample_input: str
+    sample_output: str
+    starter_code: str
+    test_cases: List[ProgrammingTestCaseAdmin] = []
+
+
+class ProgrammingExamAdminResponse(BaseModel):
+    id: int
+    title: str
+    description: str
+    duration_minutes: int
+    total_marks: int
+    assigned_students: int = 0
+    status: str
+    created_at: datetime
+    problem: Optional[ProgrammingProblemAdmin] = None
+
+
 class AssignmentStudentItem(BaseModel):
     id: int
     name: str
@@ -168,6 +240,11 @@ class LiveSessionResponse(BaseModel):
     exam_title: str
     face_status: str
     tab_switches: int
+    fullscreen_exits: int = 0
+    webcam_alerts: int = 0
+    total_alerts: int = 0
+    last_alert_message: Optional[str] = None
+    last_alert_at: Optional[datetime] = None
     progress: int
     status: str
     started_at: datetime
@@ -194,3 +271,41 @@ class SettingItem(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     items: List[SettingItem]
+
+
+class AdminSupportTicketReplyCreate(BaseModel):
+    message: str
+
+
+class AdminSupportTicketStatusUpdate(BaseModel):
+    status: str
+
+
+class AdminSupportTicketReplyUpdate(BaseModel):
+    message: str
+    status: str = "in_progress"
+
+
+class AdminSupportTicketReplyItem(BaseModel):
+    id: int
+    author_role: str
+    author_name: str
+    message: str
+    created_at: datetime
+
+
+class AdminSupportTicketItem(BaseModel):
+    id: int
+    ticket_id: str
+    student_id: int
+    student_name: str
+    student_email: str
+    subject: str
+    category: str
+    priority: str
+    message: str
+    status: str
+    admin_reply: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    replies: List[AdminSupportTicketReplyItem] = []

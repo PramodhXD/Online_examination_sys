@@ -82,7 +82,7 @@ export default function CertificateIssuance() {
         <Header activeTab="certificates" toggleSidebar={() => setIsSidebarOpen((p) => !p)} />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6">
-          <section className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-slate-200">
+          <section className="bg-white dark:bg-slate-900 rounded-2xl p-4 md:p-5 shadow-sm border border-slate-200 dark:border-slate-700">
             <div className="flex flex-col xl:flex-row gap-3 xl:items-center">
               <div className="relative flex-1 min-w-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -91,41 +91,41 @@ export default function CertificateIssuance() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by student or exam..."
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-10 pr-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
-              <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+              <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200">
                 <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />
                 Pending only
               </label>
 
-              <button onClick={loadRows} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              <button onClick={loadRows} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 dark:bg-slate-800">
                 <RefreshCcw className="w-4 h-4" />
                 Refresh
               </button>
             </div>
           </section>
 
-          <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900">Eligible Students</h3>
-              <p className="text-sm text-slate-500">{byStudent.length} students</p>
+          <section className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Eligible Students</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{byStudent.length} students</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] text-left">
-                <thead className="bg-slate-50/90 border-b border-slate-200">
+                <thead className="bg-slate-50 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Student</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Subscription</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Eligible Exams</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-right">Actions</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Student</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Subscription</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Eligible Exams</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {(loading || byStudent.length === 0) && (
                     <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-500">
+                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                         {loading ? "Loading students..." : "No eligible records found."}
                       </td>
                     </tr>
@@ -133,15 +133,15 @@ export default function CertificateIssuance() {
                   {!loading && byStudent.map((item) => (
                     <tr key={item.student_id}>
                       <td className="px-6 py-4">
-                        <p className="text-sm font-semibold text-slate-900">{item.student_name}</p>
-                        <p className="text-xs text-slate-500">{item.roll_number} • {item.email}</p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{item.student_name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{item.roll_number} • {item.email}</p>
                       </td>
                       <td className="px-6 py-4">
                         <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold bg-emerald-100 text-emerald-700">
                           {item.subscription_plan}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-slate-700">{item.count}</td>
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-200">{item.count}</td>
                       <td className="px-6 py-4 text-right">
                         <button
                           disabled={issuingStudentId === item.student_id}
@@ -159,27 +159,27 @@ export default function CertificateIssuance() {
             </div>
           </section>
 
-          <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900">Eligible Exams</h3>
-              <p className="text-sm text-slate-500">{rows.length} records</p>
+          <section className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Eligible Exams</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{rows.length} records</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1100px] text-left">
-                <thead className="bg-slate-50/90 border-b border-slate-200">
+                <thead className="bg-slate-50 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Student</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Exam</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Score</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Completed</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Status</th>
-                    <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide text-right">Action</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Student</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Exam</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Score</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Completed</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Status</th>
+                    <th className="px-6 py-3 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {(loading || rows.length === 0) && (
                     <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-sm text-slate-500">
+                      <td colSpan={6} className="px-6 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                         {loading ? "Loading exam attempts..." : "No eligible exam attempts found."}
                       </td>
                     </tr>
@@ -187,11 +187,11 @@ export default function CertificateIssuance() {
                   {!loading && rows.map((row) => (
                     <tr key={row.attempt_id}>
                       <td className="px-6 py-4">
-                        <p className="text-sm font-semibold text-slate-900">{row.student_name}</p>
-                        <p className="text-xs text-slate-500">{row.roll_number}</p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{row.student_name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{row.roll_number}</p>
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-800">{row.assessment_title}</td>
-                      <td className="px-6 py-4 text-sm text-slate-700">{row.percentage}% ({row.score}/{row.total})</td>
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-200">{row.percentage}% ({row.score}/{row.total})</td>
                       <td className="px-6 py-4 text-sm text-slate-600">{new Date(row.completed_at).toLocaleString()}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.issued ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
@@ -219,4 +219,5 @@ export default function CertificateIssuance() {
     </div>
   );
 }
+
 

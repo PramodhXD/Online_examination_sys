@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 
 export default function TermsCheckbox({
   id = "agree",
@@ -23,13 +24,32 @@ export default function TermsCheckbox({
 
       <label htmlFor={id} className="text-sm text-slate-600 leading-relaxed">
         I agree to the{" "}
-        <span className="text-indigo-600 font-medium">
+        <Link
+          to="/terms"
+          onClick={(e) => e.stopPropagation()}
+          className="text-indigo-600 font-medium hover:underline"
+          state={{ from: "/register" }}
+        >
           Terms & Conditions
-        </span>{" "}
+        </Link>{" "}
         and{" "}
-        <span className="text-indigo-600 font-medium">
+        <Link
+          to="/privacy"
+          onClick={(e) => e.stopPropagation()}
+          className="text-indigo-600 font-medium hover:underline"
+          state={{ from: "/register" }}
+        >
           Privacy Policy
-        </span>
+        </Link>
+        {" "}and{" "}
+        <Link
+          to="/exam-rules"
+          onClick={(e) => e.stopPropagation()}
+          className="text-indigo-600 font-medium hover:underline"
+          state={{ from: "/register" }}
+        >
+          Exam Rules
+        </Link>
       </label>
     </div>
   );

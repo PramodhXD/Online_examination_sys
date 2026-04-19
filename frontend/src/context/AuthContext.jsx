@@ -8,6 +8,20 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const persistUser = (nextUser) => {
+    setUser(nextUser);
+    if (nextUser) {
+      localStorage.setItem("auth_user", JSON.stringify(nextUser));
+      if (nextUser.email) {
+        localStorage.setItem("userEmail", nextUser.email);
+      }
+      return;
+    }
+
+    localStorage.removeItem("auth_user");
+    localStorage.removeItem("userEmail");
+  };
+
   // Load auth state from localStorage on app start
   useEffect(() => {
     const bootstrapAuth = async () => {
@@ -31,11 +45,13 @@ export const AuthProvider = ({ children }) => {
           name: profile.name,
           email: profile.email,
           roll_number: profile.roll_number,
+          course: profile.course,
+          batch: profile.batch,
           role: profile.role,
+          face_verified: profile.face_verified,
         };
 
-        setUser(normalizedUser);
-        localStorage.setItem("auth_user", JSON.stringify(normalizedUser));
+        persistUser(normalizedUser);
       } catch {
         setUser(null);
         setToken(null);
@@ -52,14 +68,20 @@ export const AuthProvider = ({ children }) => {
 
   // Login handler
   const login = (userData, authToken) => {
-    setUser(userData);
+    persistUser(userData);
     setToken(authToken);
-
-    localStorage.setItem("auth_user", JSON.stringify(userData));
     localStorage.setItem("auth_token", authToken);
-    if (userData?.email) {
-      localStorage.setItem("userEmail", userData.email);
-    }
+  };
+
+  const updateUser = (updates) => {
+    setUser((prev) => {
+      const nextUser = { ...(prev || {}), ...(updates || {}) };
+      localStorage.setItem("auth_user", JSON.stringify(nextUser));
+      if (nextUser.email) {
+        localStorage.setItem("userEmail", nextUser.email);
+      }
+      return nextUser;
+    });
   };
 
   // Logout handler
@@ -79,6 +101,7 @@ export const AuthProvider = ({ children }) => {
         token,
         isAuthenticated: !!token,
         login,
+        updateUser,
         logout,
         loading,
       }}

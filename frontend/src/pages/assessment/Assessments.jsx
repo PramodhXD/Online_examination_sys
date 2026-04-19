@@ -41,7 +41,12 @@ export default function Assessments() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {assessments.map((exam) => {
             const Icon = getIcon(exam.title);
-            const unlimited = isUnlimitedAttemptLimit(exam.attempt_limit);
+            const attemptLimit = Number(exam.attempt_limit ?? 0);
+            const attemptsLeftRaw = Number(exam.attempts_left ?? NaN);
+            const unlimited = isUnlimitedAttemptLimit(attemptLimit);
+            const attemptsUsed = Number.isFinite(attemptsLeftRaw) && attemptLimit > 0
+              ? Math.max(0, attemptLimit - attemptsLeftRaw)
+              : Number(exam.attempts_used ?? 0);
             return (
               <div
                 key={exam.id}
@@ -60,9 +65,13 @@ export default function Assessments() {
                   <span>{exam.duration} Minutes</span>
                   <span>{exam.total_marks} Marks</span>
                 </div>
-                <p className="text-sm text-gray-600 mb-6">
-                  Attempt limit: <strong>{unlimited ? "Unlimited" : (exam.attempt_limit ?? 1)}</strong> | Used: <strong>{exam.attempts_used ?? 0}</strong> | Left: <strong>{unlimited ? "Unlimited" : (exam.attempts_left ?? 0)}</strong>
-                </p>
+                {!unlimited ? (
+                  <p className="text-sm text-gray-600 mb-6">
+                    Attempt limit: <strong>{attemptLimit || 1}</strong> | Used: <strong>{attemptsUsed}</strong>
+                  </p>
+                ) : (
+                  <div className="mb-6" />
+                )}
 
                 <button
                   disabled={Boolean(exam.limit_reached)}

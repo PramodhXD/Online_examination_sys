@@ -35,41 +35,42 @@ export default function OverallAccuracyCard({ accuracy = 84.5 }) {
   }
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border dark:border-slate-700 p-6 transition">
+    <div className="h-full min-h-[132px] rounded-xl border bg-white p-4 shadow-sm transition dark:border-slate-700 dark:bg-slate-800">
 
       {/* Header */}
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-2">
-          <TrendingUp className="w-5 h-5 text-blue-600" />
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
-            Overall Accuracy
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100">
+            <TrendingUp className="h-4 w-4 text-blue-600" />
+          </div>
+          <h3 className="text-xs text-gray-500 dark:text-gray-400">
+            Accuracy
           </h3>
         </div>
-
-        <span className={`text-2xl font-bold ${textColor}`}>
+        <span className={`shrink-0 text-xl font-semibold leading-none ${textColor}`}>
           {displayValue}%
         </span>
       </div>
 
-      {/* Progress Bar */}
-      <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-3 mb-4 overflow-hidden">
-        <div
-          className={`${barColor} h-3 rounded-full transition-all duration-1000`}
-          style={{ width: `${accuracy}%` }}
-        ></div>
-      </div>
-
-      {/* Labels */}
-      <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-2">
-        <span>Poor</span>
-        <span>Average</span>
-        <span>Target</span>
-        <span>Excellent</span>
-      </div>
-
-      <p className="text-xs text-gray-400 italic">
+      <p className="mb-3 text-xs text-gray-400 dark:text-gray-500">
         Based on recent assessments
       </p>
+
+      <div className="mt-auto">
+        <div className="mb-3 h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-slate-700">
+          <div
+            className={`${barColor} h-2 rounded-full transition-all duration-1000`}
+            style={{ width: `${accuracy}%` }}
+          ></div>
+        </div>
+
+        <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+          <span>Poor</span>
+          <span>Avg</span>
+          <span>Target</span>
+          <span>Top</span>
+        </div>
+      </div>
     </div>
   );
 }

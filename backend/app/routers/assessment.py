@@ -1,4 +1,5 @@
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import List
@@ -30,12 +31,17 @@ from app.models.assessment import (
 )
 from app.models.user import User
 from app.schemas.assessment import (
+    AssessmentAttemptReview,
     AssessmentCategoryResponse,
     AssessmentCertificateItem,
+    AssessmentProctoringEvent,
+    AssessmentReviewQuestion,
     AssessmentQuestionResponse,
+    AssessmentSessionResponse,
     AssessmentResult,
     AssessmentSubmit,
 )
+from app.services.notification_service import create_notification
 from app.utils.attempt_limits import (
     calculate_attempts_left,
     has_attempts_remaining,
@@ -49,6 +55,7 @@ router = APIRouter(prefix="/assessments", tags=["Assessments"])
 VIOLATION_SUBMITTED = "VIOLATION_SUBMITTED"
 PUBLISHED_STATUS = "PUBLISHED"
 PASS_PERCENTAGE = 50.0
+DEFAULT_ASSESSMENT_QUESTION_LIMIT = 60
 SIGNATURE_IMAGE_CANDIDATES = (
     Path(__file__).resolve().parent.parent / "assets" / "certificate_signature.png",
     Path(__file__).resolve().parent.parent / "assets" / "certificate_signature.jpg",
@@ -62,11 +69,317 @@ def _is_certificate_eligible(attempt: AssessmentAttempt) -> bool:
     return float(attempt.accuracy or 0) >= PASS_PERCENTAGE
 
 
+def _normalize_submission_reason(reason: str | None) -> str:
+    normalized = (reason or "").strip().lower()
+    if normalized in {"manual", "timeout", "violation"}:
+        return normalized
+    return "manual"
+
+
+def _attempt_duration_minutes(
+    attempt: AssessmentAttempt,
+    category: AssessmentCategory | None = None,
+) -> int:
+    duration = int(getattr(attempt, "duration_minutes", 0) or 0)
+    if duration > 0:
+        return duration
+    if category is not None:
+        return max(1, int(category.duration or 0))
+    return 60
+
+
+def _attempt_deadline(
+    attempt: AssessmentAttempt,
+    category: AssessmentCategory | None = None,
+) -> datetime | None:
+    if attempt.started_at is None:
+        return None
+    return attempt.started_at + timedelta(minutes=_attempt_duration_minutes(attempt, category))
+
+
+def _attempt_remaining_seconds(
+    attempt: AssessmentAttempt,
+    *,
+    now: datetime | None = None,
+    category: AssessmentCategory | None = None,
+) -> int:
+    deadline = _attempt_deadline(attempt, category)
+    if deadline is None:
+        return 0
+    current_time = now or datetime.utcnow()
+    return max(0, int((deadline - current_time).total_seconds()))
+
+
+def _is_attempt_open(attempt: AssessmentAttempt) -> bool:
+    return (
+        str(attempt.status or "").upper() in {"IN_PROGRESS", "LIVE", "FLAGGED"}
+        and attempt.completed_at is None
+    )
+
+
+def _record_proctoring_event(
+    attempt: AssessmentAttempt,
+    *,
+    event_type: str,
+    message: str | None = None,
+) -> None:
+    normalized_event_type = str(event_type or "").strip().lower()
+    normalized_message = str(message or "").strip()
+
+    attempt.proctor_alert_count = int(attempt.proctor_alert_count or 0) + 1
+    attempt.last_proctor_event = normalized_message or normalized_event_type or "Proctoring alert"
+    attempt.last_proctor_event_at = datetime.utcnow()
+
+    if normalized_event_type == "tab_switch":
+        attempt.tab_switches = int(attempt.tab_switches or 0) + 1
+    elif normalized_event_type == "fullscreen_exit":
+        attempt.fullscreen_exits = int(attempt.fullscreen_exits or 0) + 1
+    elif normalized_event_type in {
+        "camera_access_denied",
+        "multiple_faces",
+        "no_face_detected",
+        "face_mismatch",
+        "webcam_disconnected",
+        "webcam_error",
+    }:
+        attempt.webcam_alerts = int(attempt.webcam_alerts or 0) + 1
+
+
 async def _get_user(db: AsyncSession, user_id: int) -> User:
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+async def _get_attempt_assignment_rows(
+    db: AsyncSession,
+    attempt_id: int,
+) -> list[AssessmentAnswer]:
+    return (
+        await db.execute(
+            select(AssessmentAnswer)
+            .where(AssessmentAnswer.attempt_id == attempt_id)
+            .order_by(AssessmentAnswer.question_order.asc(), AssessmentAnswer.id.asc())
+        )
+    ).scalars().all()
+
+
+async def _bind_attempt_questions(
+    db: AsyncSession,
+    *,
+    attempt: AssessmentAttempt,
+    questions: list[AssessmentQuestion],
+) -> list[AssessmentAnswer]:
+    assignment_rows = await _get_attempt_assignment_rows(db, attempt.id)
+    if assignment_rows:
+        return assignment_rows
+
+    for order_index, question in enumerate(questions, start=1):
+        db.add(
+            AssessmentAnswer(
+                attempt_id=attempt.id,
+                question_id=question.id,
+                selected_option=0,
+                is_correct=False,
+                time_taken_seconds=0,
+                question_order=order_index,
+            )
+        )
+    await db.flush()
+    return await _get_attempt_assignment_rows(db, attempt.id)
+
+
+def _serialize_question_ids(question_ids: list[int]) -> str:
+    return json.dumps([int(question_id) for question_id in question_ids])
+
+
+async def _finalize_attempt(
+    db: AsyncSession,
+    *,
+    attempt: AssessmentAttempt,
+    category: AssessmentCategory,
+    plan_cfg,
+    submit_reason: str,
+    question_ids: list[int] | None = None,
+    answers: list[int] | None = None,
+    question_times: list[int] | None = None,
+) -> AssessmentResult:
+    normalized_submit_reason = _normalize_submission_reason(submit_reason)
+    requested_question_ids = list(question_ids or [])
+    requested_answers = list(answers or [])
+    requested_question_times = list(question_times or [])
+    assignment_rows = await _get_attempt_assignment_rows(db, attempt.id)
+    if not assignment_rows:
+        if normalized_submit_reason == "timeout":
+            attempt.score = 0
+            attempt.total = 0
+            attempt.accuracy = 0
+            attempt.submit_reason = normalized_submit_reason
+            attempt.status = "COMPLETED"
+            attempt.completed_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(attempt)
+            await create_notification(
+                db,
+                user_id=attempt.user_id,
+                title="Assessment auto-submitted",
+                message=f"Your assessment '{category.title}' was auto-submitted because the time expired.",
+                notification_type="warning",
+                link=f"/assessment/result?attempt={attempt.id}",
+            )
+            await db.commit()
+            return AssessmentResult(
+                attempt_id=attempt.id,
+                score=0,
+                total=0,
+                percentage=0,
+                correct_answers=0,
+                wrong_answers=0,
+                certificate_eligible=False,
+                certificate_download_url=None,
+            )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid submission: no server-side question assignment found for this attempt",
+        )
+
+    assigned_question_ids = [int(row.question_id) for row in assignment_rows]
+    if len(requested_answers) != len(assigned_question_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid submission: submitted answer count does not match the assigned questions",
+        )
+    if requested_question_times is not None and len(requested_question_times) != len(assigned_question_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid submission: submitted timing count does not match the assigned questions",
+        )
+    if requested_question_ids != assigned_question_ids:
+        submitted_unique_ids = set(requested_question_ids)
+        assigned_unique_ids = set(assigned_question_ids)
+        if len(requested_question_ids) != len(set(requested_question_ids)):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid submission: duplicate question ids were submitted",
+            )
+        if submitted_unique_ids - assigned_unique_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid submission: request includes question ids that were not assigned to this attempt",
+            )
+        if assigned_unique_ids - submitted_unique_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid submission: request is missing one or more assigned questions",
+            )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid submission: submitted questions do not match the server-side attempt record",
+        )
+
+    if not requested_question_times:
+        requested_question_times = [0] * len(assigned_question_ids)
+
+    questions = (
+        await db.execute(
+            select(AssessmentQuestion).where(AssessmentQuestion.id.in_(assigned_question_ids))
+        )
+    ).scalars().all()
+    if len(questions) != len(assigned_question_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid submission: assigned questions could not be resolved on the server",
+        )
+    question_map = {question.id: question for question in questions}
+    ordered_questions = [question_map[question_id] for question_id in assigned_question_ids]
+
+    score = 0
+    total = 0
+    correct_answers = 0
+
+    for assignment_row, question, selected, time_taken_seconds in zip(
+        assignment_rows,
+        ordered_questions,
+        requested_answers,
+        requested_question_times,
+    ):
+        marks = int(question.marks or 0)
+        total += marks
+        selected_option = int(selected or 0)
+        is_correct = selected_option == int(question.correct_option or 0)
+        if is_correct:
+            score += marks
+            correct_answers += 1
+        assignment_row.selected_option = selected_option
+        assignment_row.is_correct = is_correct
+        assignment_row.time_taken_seconds = max(0, int(time_taken_seconds or 0))
+
+    percentage = (score / total) * 100 if total > 0 else 0
+    wrong_answers = max(0, len(ordered_questions) - correct_answers)
+    attempt.score = score
+    attempt.total = total
+    attempt.accuracy = round(percentage, 2)
+    attempt.submit_reason = normalized_submit_reason
+    attempt.status = (
+        VIOLATION_SUBMITTED if normalized_submit_reason == "violation" else "COMPLETED"
+    )
+    attempt.completed_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(attempt)
+    await create_notification(
+        db,
+        user_id=attempt.user_id,
+        title="Assessment result available",
+        message=(
+            f"Your assessment '{category.title}' was submitted via "
+            f"{'timeout' if normalized_submit_reason == 'timeout' else 'manual submission'}. "
+            f"Score: {round(percentage, 2)}%."
+        ),
+        notification_type="success" if normalized_submit_reason == "manual" else "warning",
+        link=f"/assessment/result?attempt={attempt.id}",
+    )
+    await db.commit()
+
+    certificate_eligible = (
+        plan_cfg.allow_certificates
+        and bool(attempt.certificate_issued_by_admin)
+        and _is_certificate_eligible(attempt)
+    )
+
+    return AssessmentResult(
+        attempt_id=attempt.id,
+        score=score,
+        total=total,
+        percentage=round(percentage, 2),
+        correct_answers=correct_answers,
+        wrong_answers=wrong_answers,
+        certificate_eligible=certificate_eligible,
+        certificate_download_url=(
+            f"/assessments/certificates/{attempt.id}/download" if certificate_eligible else None
+        ),
+    )
+
+
+async def _auto_submit_if_expired(
+    db: AsyncSession,
+    *,
+    attempt: AssessmentAttempt,
+    category: AssessmentCategory,
+    plan_cfg,
+) -> tuple[bool, AssessmentResult | None]:
+    if not _is_attempt_open(attempt):
+        return False, None
+    if _attempt_remaining_seconds(attempt, category=category) > 0:
+        return False, None
+    result = await _finalize_attempt(
+        db,
+        attempt=attempt,
+        category=category,
+        plan_cfg=plan_cfg,
+        submit_reason="timeout",
+    )
+    return True, result
 
 
 def _build_certificate_token(attempt: AssessmentAttempt) -> str:
@@ -423,6 +736,7 @@ async def get_assessments(
 async def get_questions(
     category_id: int,
     limit: int | None = None,
+    attempt_id: int | None = None,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -440,15 +754,65 @@ async def get_questions(
     if not await is_user_assigned_to_exam(db, category_id, current_user["id"]):
         raise HTTPException(status_code=403, detail="This exam is not assigned to you")
 
-    query = (
-        select(AssessmentQuestion)
-        .where(AssessmentQuestion.category_id == category_id)
-        .order_by(func.random())
-    )
-    if limit:
-        query = query.limit(limit)
-
-    questions = (await db.execute(query)).scalars().all()
+    if attempt_id is not None:
+        user = await _get_user(db, current_user["id"])
+        attempt = (
+            await db.execute(
+                select(AssessmentAttempt).where(
+                    AssessmentAttempt.id == attempt_id,
+                    AssessmentAttempt.user_id == current_user["id"],
+                    AssessmentAttempt.category_id == category_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not attempt:
+            raise HTTPException(status_code=404, detail="Attempt not found")
+        expired, _ = await _auto_submit_if_expired(
+            db,
+            attempt=attempt,
+            category=category,
+            plan_cfg=get_plan_config(user.subscription_plan),
+        )
+        if expired:
+            raise HTTPException(status_code=409, detail="Assessment time has expired")
+        assignment_rows = await _get_attempt_assignment_rows(db, attempt.id)
+        if assignment_rows:
+            assigned_question_ids = [int(row.question_id) for row in assignment_rows]
+            question_rows = (
+                await db.execute(
+                    select(AssessmentQuestion).where(AssessmentQuestion.id.in_(assigned_question_ids))
+                )
+            ).scalars().all()
+            question_map = {question.id: question for question in question_rows}
+            questions = [
+                question_map[question_id]
+                for question_id in assigned_question_ids
+                if question_id in question_map
+            ]
+        else:
+            query = (
+                select(AssessmentQuestion)
+                .where(AssessmentQuestion.category_id == category_id)
+                .order_by(func.random())
+            )
+            if limit:
+                query = query.limit(limit)
+            questions = (await db.execute(query)).scalars().all()
+            if questions:
+                attempt.assigned_question_ids = _serialize_question_ids(
+                    [int(question.id) for question in questions]
+                )
+                await _bind_attempt_questions(db, attempt=attempt, questions=questions)
+                await db.commit()
+    else:
+        query = (
+            select(AssessmentQuestion)
+            .where(AssessmentQuestion.category_id == category_id)
+            .order_by(func.random())
+        )
+        if limit:
+            query = query.limit(limit)
+        questions = (await db.execute(query)).scalars().all()
     if not questions:
         raise HTTPException(status_code=404, detail="No questions found")
 
@@ -496,7 +860,43 @@ async def start_assessment(
         )
     ).scalars().first()
     if open_attempt:
-        return {"attempt_id": open_attempt.id}
+        expired, _ = await _auto_submit_if_expired(
+            db,
+            attempt=open_attempt,
+            category=category,
+            plan_cfg=plan_cfg,
+        )
+        if not expired:
+            assignment_rows = await _get_attempt_assignment_rows(db, open_attempt.id)
+            assigned_question_ids = [int(row.question_id) for row in assignment_rows]
+            question_rows = (
+                await db.execute(
+                    select(AssessmentQuestion).where(AssessmentQuestion.id.in_(assigned_question_ids))
+                )
+            ).scalars().all() if assigned_question_ids else []
+            question_map = {question.id: question for question in question_rows}
+            questions = [
+                AssessmentQuestionResponse(
+                    id=question_map[question_id].id,
+                    question_text=question_map[question_id].question_text,
+                    options=[
+                        question_map[question_id].option_1,
+                        question_map[question_id].option_2,
+                        question_map[question_id].option_3,
+                        question_map[question_id].option_4,
+                    ],
+                )
+                for question_id in assigned_question_ids
+                if question_id in question_map
+            ]
+            return {
+                "attempt_id": open_attempt.id,
+                "resumed": True,
+                "started_at": open_attempt.started_at.isoformat() if open_attempt.started_at else None,
+                "duration_minutes": _attempt_duration_minutes(open_attempt, category),
+                "remaining_seconds": _attempt_remaining_seconds(open_attempt, category=category),
+                "questions": questions,
+            }
 
     if plan_cfg.assessment_limit_per_month is not None:
         now = datetime.utcnow()
@@ -537,11 +937,130 @@ async def start_assessment(
         accuracy=0,
         status="IN_PROGRESS",
         started_at=datetime.utcnow(),
+        duration_minutes=max(1, int(category.duration or 0)),
     )
     db.add(attempt)
+    await db.flush()
+
+    selected_questions = (
+        await db.execute(
+            select(AssessmentQuestion)
+            .where(AssessmentQuestion.category_id == category_id)
+            .order_by(func.random())
+            .limit(DEFAULT_ASSESSMENT_QUESTION_LIMIT)
+        )
+    ).scalars().all()
+    if not selected_questions:
+        raise HTTPException(status_code=404, detail="No questions found")
+
+    attempt.assigned_question_ids = _serialize_question_ids(
+        [int(question.id) for question in selected_questions]
+    )
+    await _bind_attempt_questions(db, attempt=attempt, questions=selected_questions)
     await db.commit()
     await db.refresh(attempt)
-    return {"attempt_id": attempt.id}
+    return {
+        "attempt_id": attempt.id,
+        "resumed": False,
+        "started_at": attempt.started_at.isoformat() if attempt.started_at else None,
+        "duration_minutes": _attempt_duration_minutes(attempt, category),
+        "remaining_seconds": _attempt_remaining_seconds(attempt, category=category),
+        "questions": [
+            AssessmentQuestionResponse(
+                id=question.id,
+                question_text=question.question_text,
+                options=[question.option_1, question.option_2, question.option_3, question.option_4],
+            )
+            for question in selected_questions
+        ],
+    }
+
+
+@router.get("/attempts/{attempt_id}/session", response_model=AssessmentSessionResponse)
+async def get_assessment_session(
+    attempt_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await _get_user(db, current_user["id"])
+    row = (
+        await db.execute(
+            select(AssessmentAttempt, AssessmentCategory)
+            .join(AssessmentCategory, AssessmentCategory.id == AssessmentAttempt.category_id)
+            .where(AssessmentAttempt.id == attempt_id)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+
+    attempt, category = row
+    if attempt.user_id != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    auto_submitted, _ = await _auto_submit_if_expired(
+        db,
+        attempt=attempt,
+        category=category,
+        plan_cfg=get_plan_config(user.subscription_plan),
+    )
+    if auto_submitted:
+        row = (
+            await db.execute(
+                select(AssessmentAttempt, AssessmentCategory)
+                .join(AssessmentCategory, AssessmentCategory.id == AssessmentAttempt.category_id)
+                .where(AssessmentAttempt.id == attempt_id)
+            )
+        ).first()
+        attempt, category = row
+
+    remaining_seconds = _attempt_remaining_seconds(attempt, category=category)
+    return AssessmentSessionResponse(
+        attempt_id=attempt.id,
+        category_id=category.id,
+        assessment_title=category.title,
+        status=str(attempt.status or "").upper(),
+        started_at=attempt.started_at.isoformat() if attempt.started_at else None,
+        duration_minutes=_attempt_duration_minutes(attempt, category),
+        remaining_seconds=remaining_seconds,
+        expired=remaining_seconds <= 0,
+        auto_submitted=auto_submitted,
+    )
+
+
+@router.post("/attempts/{attempt_id}/proctoring")
+async def report_assessment_proctoring_event(
+    attempt_id: int,
+    payload: AssessmentProctoringEvent,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    attempt = (
+        await db.execute(
+            select(AssessmentAttempt).where(AssessmentAttempt.id == attempt_id)
+        )
+    ).scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.user_id != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    if not _is_attempt_open(attempt):
+        raise HTTPException(status_code=409, detail="Attempt is no longer active")
+
+    _record_proctoring_event(
+        attempt,
+        event_type=payload.event_type,
+        message=payload.message,
+    )
+    await db.commit()
+
+    return {
+        "attempt_id": attempt.id,
+        "tab_switches": int(attempt.tab_switches or 0),
+        "fullscreen_exits": int(attempt.fullscreen_exits or 0),
+        "webcam_alerts": int(attempt.webcam_alerts or 0),
+        "total_alerts": int(attempt.proctor_alert_count or 0),
+        "last_alert_message": attempt.last_proctor_event,
+    }
 
 
 @router.post("/submit", response_model=AssessmentResult)
@@ -564,72 +1083,123 @@ async def submit_assessment(
         raise HTTPException(status_code=403, detail="Not authorized")
     if attempt.status in {"COMPLETED", VIOLATION_SUBMITTED}:
         raise HTTPException(status_code=400, detail="Already submitted")
-    if len(data.answers) != len(data.question_ids):
-        raise HTTPException(status_code=400, detail="Answer mismatch")
-
-    questions = (
+    category = (
         await db.execute(
-            select(AssessmentQuestion).where(AssessmentQuestion.id.in_(data.question_ids))
+            select(AssessmentCategory).where(AssessmentCategory.id == attempt.category_id)
         )
-    ).scalars().all()
-    if len(questions) != len(data.question_ids):
-        raise HTTPException(status_code=400, detail="Question mismatch")
+    ).scalar_one_or_none()
+    if not category:
+        raise HTTPException(status_code=404, detail="Assessment not found")
 
-    question_map = {q.id: q for q in questions}
-    score = 0
-    total = 0
+    submit_reason = _normalize_submission_reason(data.submit_reason)
+    if _attempt_remaining_seconds(attempt, category=category) <= 0:
+        submit_reason = "timeout"
+
+    return await _finalize_attempt(
+        db,
+        attempt=attempt,
+        category=category,
+        plan_cfg=plan_cfg,
+        submit_reason=submit_reason,
+        question_ids=data.question_ids,
+        answers=data.answers,
+        question_times=data.question_times,
+    )
+
+
+@router.get("/attempts/{attempt_id}/review", response_model=AssessmentAttemptReview)
+async def get_attempt_review(
+    attempt_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await _get_user(db, current_user["id"])
+
+    row = (
+        await db.execute(
+            select(AssessmentAttempt, AssessmentCategory)
+            .join(AssessmentCategory, AssessmentCategory.id == AssessmentAttempt.category_id)
+            .where(AssessmentAttempt.id == attempt_id)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+
+    attempt, category = row
+    if attempt.user_id != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    answer_rows = (
+        await db.execute(
+            select(AssessmentAnswer, AssessmentQuestion)
+            .join(AssessmentQuestion, AssessmentQuestion.id == AssessmentAnswer.question_id)
+            .where(AssessmentAnswer.attempt_id == attempt.id)
+            .order_by(AssessmentAnswer.question_order.asc(), AssessmentAnswer.id.asc())
+        )
+    ).all()
+
+    review_questions: list[AssessmentReviewQuestion] = []
     correct_answers = 0
-
-    for q_id, selected in zip(data.question_ids, data.answers):
-        question = question_map.get(q_id)
-        if not question:
-            continue
-        total += question.marks
-        is_correct = selected == question.correct_option
+    for fallback_index, (answer, question) in enumerate(answer_rows, start=1):
+        options = [
+            question.option_1,
+            question.option_2,
+            question.option_3,
+            question.option_4,
+        ]
+        user_answer = int(answer.selected_option or 0)
+        correct_answer = int(question.correct_option or 0)
+        safe_user_answer = user_answer if 1 <= user_answer <= len(options) else None
+        safe_correct_answer = correct_answer if 1 <= correct_answer <= len(options) else None
+        is_correct = bool(answer.is_correct)
         if is_correct:
-            score += question.marks
             correct_answers += 1
-        db.add(
-            AssessmentAnswer(
-                attempt_id=attempt.id,
-                question_id=question.id,
-                selected_option=selected,
+
+        review_questions.append(
+            AssessmentReviewQuestion(
+                id=question.id,
+                order=int(answer.question_order or fallback_index),
+                question_text=question.question_text,
+                options=options,
+                user_answer=safe_user_answer,
+                user_answer_text=options[safe_user_answer - 1] if safe_user_answer else None,
+                correct_answer=safe_correct_answer or 0,
+                correct_answer_text=options[safe_correct_answer - 1] if safe_correct_answer else "",
                 is_correct=is_correct,
+                time_taken_seconds=max(0, int(answer.time_taken_seconds or 0)),
             )
         )
 
-    percentage = (score / total) * 100 if total > 0 else 0
-    wrong_answers = len(data.question_ids) - correct_answers
-    attempt.score = score
-    attempt.total = total
-    attempt.accuracy = round(percentage, 2)
-    is_violation_submit = (data.submit_reason or "").strip().lower() == "violation"
-    attempt.status = VIOLATION_SUBMITTED if is_violation_submit else "COMPLETED"
-    attempt.completed_at = datetime.utcnow()
-    await db.commit()
-
     certificate_eligible = (
-        plan_cfg.allow_certificates
+        get_plan_config(user.subscription_plan).allow_certificates
         and bool(attempt.certificate_issued_by_admin)
         and _is_certificate_eligible(attempt)
     )
 
-    return AssessmentResult(
+    return AssessmentAttemptReview(
         attempt_id=attempt.id,
-        score=score,
-        total=total,
-        percentage=round(percentage, 2),
+        category_id=category.id,
+        assessment_title=category.title,
+        status=str(attempt.status or "").upper(),
+        submission_reason=_normalize_submission_reason(attempt.submit_reason),
+        started_at=attempt.started_at.isoformat() if attempt.started_at else None,
+        completed_at=attempt.completed_at.isoformat() if attempt.completed_at else None,
+        score=int(attempt.score or 0),
+        total=int(attempt.total or 0),
+        percentage=round(float(attempt.accuracy or 0), 2),
         correct_answers=correct_answers,
-        wrong_answers=wrong_answers,
+        wrong_answers=max(0, len(review_questions) - correct_answers),
         certificate_eligible=certificate_eligible,
         certificate_download_url=(
             f"/assessments/certificates/{attempt.id}/download" if certificate_eligible else None
         ),
+        questions=review_questions,
     )
 
 
 @router.get("/certificates", response_model=List[AssessmentCertificateItem])
 async def list_my_certificates(
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -661,6 +1231,8 @@ async def list_my_certificates(
             score=int(attempt.score or 0),
             total=int(attempt.total or 0),
             completed_at=attempt.completed_at.isoformat() if attempt.completed_at else "",
+            certificate_id=(token := _build_certificate_token(attempt))[:16],
+            verify_url=str(request.url_for("verify_certificate", token=token)),
         )
         for attempt, category in rows
     ]

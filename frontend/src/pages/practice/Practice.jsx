@@ -68,9 +68,13 @@ export default function Practice() {
 
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">{category.name}</h3>
                 <p className="text-sm text-gray-600 mb-3">{category.description}</p>
-                <p className="text-sm text-gray-600 mb-6">
-                  Attempt limit: <strong>{unlimited ? "Unlimited" : (category.attempt_limit ?? 1)}</strong> | Used: <strong>{category.attempts_used ?? 0}</strong> | Left: <strong>{unlimited ? "Unlimited" : (category.attempts_left ?? 0)}</strong>
-                </p>
+                {!unlimited ? (
+                  <p className="text-sm text-gray-600 mb-6">
+                    Attempt limit: <strong>{category.attempt_limit ?? 1}</strong> | Used: <strong>{category.attempts_used ?? 0}</strong>
+                  </p>
+                ) : (
+                  <div className="mb-6" />
+                )}
 
                 <button
                   disabled={Boolean(category.limit_reached)}

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Mail, ShieldCheck } from "lucide-react";
 import { forgotPassword } from "../../services/authService";
 import { useNavigate } from "react-router-dom";
+import PolicyLinks from "../../components/common/PolicyLinks";
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
@@ -27,7 +28,7 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-indigo-100 px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-indigo-100 px-4 py-8">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 relative">
         <div className="absolute -top-10 left-1/2 -translate-x-1/2">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg">
@@ -91,6 +92,7 @@ export default function ForgotPassword() {
           </button>
         </div>
       </div>
+      <PolicyLinks className="mt-6" />
     </div>
   );
 }

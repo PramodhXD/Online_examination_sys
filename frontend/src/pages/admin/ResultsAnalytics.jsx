@@ -41,42 +41,42 @@ export default function ResultsAnalytics() {
         <Header activeTab="analytics" toggleSidebar={() => setIsSidebarOpen((p) => !p)} />
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6">
           <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white rounded-2xl p-5 border border-slate-200"><p className="text-xs text-slate-500 inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" />Total Attempts</p><p className="text-2xl font-bold text-slate-900 mt-1">{totalAttempts}</p></div>
-            <div className="bg-white rounded-2xl p-5 border border-slate-200"><p className="text-xs text-slate-500 inline-flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5" />Average Score</p><p className="text-2xl font-bold text-blue-700 mt-1">{avgScore}%</p></div>
-            <div className="bg-white rounded-2xl p-5 border border-slate-200"><p className="text-xs text-slate-500 inline-flex items-center gap-1"><Trophy className="w-3.5 h-3.5" />Pass Rate</p><p className="text-2xl font-bold text-green-700 mt-1">{avgPass}%</p></div>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-700"><p className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" />Total Attempts</p><p className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">{totalAttempts}</p></div>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-700"><p className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5" />Average Score</p><p className="text-2xl font-bold text-blue-700 mt-1">{avgScore}%</p></div>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-700"><p className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1"><Trophy className="w-3.5 h-3.5" />Pass Rate</p><p className="text-2xl font-bold text-green-700 mt-1">{avgPass}%</p></div>
           </section>
 
-          <section className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+          <section className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search exam results..." className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search exam results..." className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20" />
             </div>
           </section>
 
-          <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] text-left">
-                <thead className="bg-slate-50 border-b border-slate-200">
+                <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Exam</th>
-                    <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Attempts</th>
-                    <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Average</th>
-                    <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Pass Rate</th>
-                    <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Distribution</th>
+                    <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">Exam</th>
+                    <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">Attempts</th>
+                    <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">Average</th>
+                    <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">Pass Rate</th>
+                    <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">Distribution</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {loading && <tr><td colSpan={5} className="px-6 py-10 text-center text-slate-500">Loading analytics...</td></tr>}
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {loading && <tr><td colSpan={5} className="px-6 py-10 text-center text-slate-500 dark:text-slate-400">Loading analytics...</td></tr>}
                   {!loading && list.map((r) => (
-                    <tr key={r.exam} className="hover:bg-slate-50/70">
-                      <td className="px-6 py-4 text-sm font-semibold text-slate-900">{r.exam}</td>
-                      <td className="px-6 py-4 text-sm text-slate-700">{r.attempts}</td>
-                      <td className="px-6 py-4 text-sm text-slate-700">{r.average}%</td>
-                      <td className="px-6 py-4 text-sm text-slate-700">{r.pass_rate}%</td>
+                    <tr key={r.exam} className="hover:bg-slate-50 dark:hover:bg-slate-800 dark:bg-slate-800/70">
+                      <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-slate-100">{r.exam}</td>
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-200">{r.attempts}</td>
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-200">{r.average}%</td>
+                      <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-200">{r.pass_rate}%</td>
                       <td className="px-6 py-4"><div className="w-48 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-600" style={{ width: `${r.average}%` }} /></div></td>
                     </tr>
                   ))}
-                  {!loading && list.length === 0 && <tr><td colSpan={5} className="px-6 py-10 text-center text-slate-500">No analytics found.</td></tr>}
+                  {!loading && list.length === 0 && <tr><td colSpan={5} className="px-6 py-10 text-center text-slate-500 dark:text-slate-400">No analytics found.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -86,5 +86,6 @@ export default function ResultsAnalytics() {
     </div>
   );
 }
+
 
 
